@@ -1,0 +1,518 @@
+"""Panda3D application: window, lighting, terrain streaming, camera and HUD."""
+
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+from direct.gui.OnscreenText import OnscreenText
+from direct.showbase.ShowBase import ShowBase
+from panda3d.bullet import BulletDebugNode, BulletWorld
+from panda3d.core import (
+    AmbientLight,
+    CardMaker,
+    DirectionalLight,
+    Fog,
+    NodePath,
+    Point3,
+    TextNode,
+    TransparencyAttrib,
+    Vec3,
+    Vec4,
+    WindowProperties,
+)
+
+from .assets import AssetLibrary
+from .battle import TEAM_COLORS, TEAM_NAMES, Battle
+from .chunks import ChunkManager
+from .terrain import WATER_COLOR, InfiniteTerrain
+
+SKY_COLOR = Vec4(0.52, 0.68, 0.86, 1.0)
+PHYSICS_STEP = 1.0 / 120.0
+CAMERA_MODES = ("orbit", "chase", "high", "free")
+MOVE_KEYS = ("w", "a", "s", "d", "q", "e")
+LOOK_KEYS = ("arrow_left", "arrow_right", "arrow_up", "arrow_down")
+
+# Legend: display order and short labels, heaviest units first.
+ROSTER = (
+    ("jet", "caza"),
+    ("helicopter", "heli"),
+    ("osprey", "V22"),
+    ("tank", "tanque"),
+    ("sam", "AA"),
+    ("rocket", "RPG"),
+    ("rifleman", "fusil"),
+)
+
+
+class SimulationApp(ShowBase):
+    def __init__(self, args) -> None:
+        super().__init__()
+        self.args = args
+        self.paused = False
+        self.camera_mode = "orbit"
+        self.chase_index = 0
+        self.orbit_angle = 40.0
+        self.orbit_height = 0.62
+        self.orbit_distance = 0.72
+        self.sim_time = 0.0
+        self._physics_debt = 0.0
+        self.focus_smooth: Point3 | None = None
+        self.keys: set[str] = set()
+        self.mouse_look = False
+        self._last_pointer: tuple[float, float] | None = None
+        self.dragging = False
+        self._drag_from: tuple[float, float] | None = None
+
+        self.disable_mouse()
+        self.set_background_color(SKY_COLOR)
+
+        self.world = BulletWorld()
+        self.world.set_gravity(Vec3(0, 0, -9.81))
+
+        self.terrain = InfiniteTerrain(
+            seed=args.seed,
+            relief=args.relief,
+            feature_scale=args.feature_scale,
+            chunk_size=args.chunk_size,
+            clear_radius=args.clear_radius,
+        )
+        self.chunks = ChunkManager(
+            self.terrain,
+            self.render,
+            self.world,
+            view_radius=args.view_chunks,
+            physics_radius=max(1, args.view_chunks - 2),
+            trees_per_chunk=args.trees,
+        )
+
+        self._setup_lighting()
+        self._setup_water()
+
+        assets_dir = Path(args.assets) if args.assets else Path.cwd() / "assets"
+        self.assets = AssetLibrary(self.loader, assets_dir)
+
+        self.debug_np: NodePath | None = None
+        self.battle: Battle | None = None
+        self._start_battle(args.seed)
+        self.assets.print_report()
+
+        # Build the first ring up front, otherwise the units spawn over a void
+        # and fall through it before streaming catches up.
+        self.chunks.update(self._stream_anchors(), budget=10_000)
+        print(
+            f"[terreno] {self.chunks.loaded_count()} chunks cargados "
+            f"({self.chunks.view_distance:.0f} m de alcance)"
+        )
+
+        self._setup_hud()
+        self._setup_camera()
+        self._bind_keys()
+        self.task_mgr.add(self._update, "simulation-update")
+
+    # ------------------------------------------------------------------
+    # Setup
+    # ------------------------------------------------------------------
+    def _setup_lighting(self) -> None:
+        sun = DirectionalLight("sun")
+        sun.set_color(Vec4(1.05, 1.0, 0.9, 1.0))
+        sun.set_shadow_caster(True, 3072, 3072)
+        # An endless world cannot have one shadow frustum covering everything,
+        # so it covers a generous patch and is moved onto the action each frame.
+        self.shadow_span = 460.0
+        lens = sun.get_lens()
+        lens.set_film_size(self.shadow_span, self.shadow_span)
+        lens.set_near_far(-900.0, 900.0)
+        sun_np = self.render.attach_new_node(sun)
+        sun_np.set_hpr(-38, -50, 0)
+        self.render.set_light(sun_np)
+        self.sun_np = sun_np
+
+        ambient = AmbientLight("ambient")
+        ambient.set_color(Vec4(0.38, 0.42, 0.52, 1.0))
+        self.render.set_light(self.render.attach_new_node(ambient))
+
+        # Linear fog tuned to the streaming radius: it swallows the chunk
+        # boundary so terrain pops in inside the haze rather than in plain view.
+        view = self.chunks.view_distance
+        fog = Fog("distance")
+        fog.set_color(SKY_COLOR.get_xyz())
+        fog.set_linear_range(view * 0.72, view * 1.0)
+        self.render.set_fog(fog)
+
+        try:
+            self.render.set_shader_auto()
+        except Exception:  # noqa: BLE001 - fall back to fixed-function lighting
+            pass
+
+    def _setup_water(self) -> None:
+        """One big translucent quad that rides along under the camera."""
+        span = self.chunks.view_distance * 1.2
+        card = CardMaker("water")
+        card.set_frame(-span, span, -span, span)
+        self.water = self.render.attach_new_node(card.generate())
+        self.water.set_p(-90)  # cards face -Y by default; lay it flat
+        self.water.set_color(*WATER_COLOR)
+        self.water.set_transparency(TransparencyAttrib.M_alpha)
+        self.water.set_light_off()
+        self.water.set_bin("fixed", 10)
+        self.water.set_depth_write(False)
+        self.water.set_z(self.terrain.water_level)
+
+    def _setup_hud(self) -> None:
+        self.status_text = OnscreenText(
+            text="",
+            pos=(0.0, 0.90),
+            scale=0.062,
+            fg=(1, 1, 1, 1),
+            shadow=(0, 0, 0, 0.85),
+            align=TextNode.A_center,
+            mayChange=True,
+        )
+        # Per-team legend, in team colours, so you can read the shape of the
+        # battle at a glance instead of just a total.
+        self.roster_text = {}
+        for team, colour, y in (
+            (0, TEAM_COLORS[0], 0.83),
+            (1, TEAM_COLORS[1], 0.78),
+        ):
+            self.roster_text[team] = OnscreenText(
+                text="",
+                pos=(0.0, y),
+                scale=0.045,
+                fg=colour,
+                shadow=(0, 0, 0, 0.9),
+                align=TextNode.A_center,
+                mayChange=True,
+            )
+
+        self.help_text = OnscreenText(
+            text="",
+            pos=(0.0, -0.94),
+            scale=0.040,
+            fg=(0.92, 0.94, 1.0, 1),
+            shadow=(0, 0, 0, 0.85),
+            align=TextNode.A_center,
+            mayChange=True,
+        )
+        self._refresh_help()
+
+    def _refresh_help(self) -> None:
+        if self.camera_mode == "free":
+            text = (
+                "LIBRE: WASD mover   Q/E bajar-subir   ARRASTRA raton para mirar   "
+                "RUEDA avanzar   SHIFT rapido   [C] camara   [R] batalla   [ESC] salir"
+            )
+        else:
+            text = (
+                f"{self.camera_mode.upper()}: ARRASTRA raton para girar   RUEDA zoom   "
+                "[C] camara   [R] nueva batalla   [ESPACIO] pausa   "
+                "[F] fisica   [ESC] salir"
+            )
+        self.help_text.setText(text)
+
+    def _setup_camera(self) -> None:
+        self.camLens.set_fov(60)
+        self.camLens.set_near_far(0.8, self.chunks.view_distance * 2.2)
+
+    def _bind_keys(self) -> None:
+        self.accept("escape", self.user_exit)
+        self.accept("r", self.restart_battle)
+        self.accept("c", self.cycle_camera)
+        self.accept("space", self.toggle_pause)
+        self.accept("f", self.toggle_physics_debug)
+        self.accept("m", self.toggle_mouse_look)
+        # Drag to look around, wheel to zoom. Uses plain absolute mouse
+        # coordinates rather than relative-mouse capture, which is far more
+        # reliable across windowing setups.
+        self.accept("mouse1", self._grab_mouse)
+        self.accept("mouse1-up", self._release_mouse)
+        self.accept("mouse3", self._grab_mouse)
+        self.accept("mouse3-up", self._release_mouse)
+        self.accept("wheel_up", self._zoom, [-1.0])
+        self.accept("wheel_down", self._zoom, [1.0])
+        # Held keys rather than key repeat: repeat rates are jerky and differ
+        # between systems, which makes camera movement feel broken.
+        for key in (*MOVE_KEYS, *LOOK_KEYS, "shift", "-", "=", "+"):
+            self.accept(key, self.keys.add, [key])
+            self.accept(f"{key}-up", self.keys.discard, [key])
+
+    # ------------------------------------------------------------------
+    # Commands
+    # ------------------------------------------------------------------
+    def _start_battle(self, seed: int) -> None:
+        if self.battle is not None:
+            self.battle.cleanup()
+        self.battle = Battle(
+            self.render,
+            self.world,
+            self.terrain,
+            self.assets,
+            n_heli=self.args.n_heli,
+            n_tanks=self.args.n_tanks,
+            n_osprey=self.args.n_osprey,
+            n_jets=self.args.n_jets,
+            n_sam=self.args.n_sam,
+            n_rifles=self.args.n_rifles,
+            n_rockets=self.args.n_rockets,
+            seed=seed,
+            deploy_radius=self.args.deploy,
+        )
+        self.sim_time = 0.0
+        self.focus_smooth = None
+
+    def restart_battle(self) -> None:
+        # NB: not named `restart` — ShowBase already defines that and calls it.
+        self._start_battle(self.args.seed + int(self.sim_time * 1000) + 1)
+
+    def cycle_camera(self) -> None:
+        index = CAMERA_MODES.index(self.camera_mode)
+        self.camera_mode = CAMERA_MODES[(index + 1) % len(CAMERA_MODES)]
+        self.chase_index += 1
+        if self.camera_mode != "free" and self.mouse_look:
+            self.toggle_mouse_look()
+        self._refresh_help()
+
+    def _grab_mouse(self) -> None:
+        self.dragging = True
+        self._drag_from = None
+
+    def _release_mouse(self) -> None:
+        self.dragging = False
+        self._drag_from = None
+
+    def _zoom(self, direction: float) -> None:
+        if self.camera_mode == "free":
+            # Dolly along the view axis.
+            forward = self.camera.get_quat().get_forward()
+            self.camera.set_pos(self.camera.get_pos() - forward * direction * 28.0)
+        else:
+            self.orbit_distance = min(2.6, max(0.28, self.orbit_distance + direction * 0.12))
+
+    def _apply_mouse_drag(self) -> None:
+        """Drag with a mouse button held to swing the camera around."""
+        if not self.dragging or self.mouse_look or not self.mouseWatcherNode.has_mouse():
+            self._drag_from = None
+            return
+
+        pointer = self.mouseWatcherNode.get_mouse()
+        current = (pointer.get_x(), pointer.get_y())
+        if self._drag_from is not None:
+            dx = current[0] - self._drag_from[0]
+            dy = current[1] - self._drag_from[1]
+            if self.camera_mode == "free":
+                self.camera.set_h(self.camera.get_h() - dx * 110.0)
+                self.camera.set_p(max(-88.0, min(88.0, self.camera.get_p() + dy * 110.0)))
+            else:
+                self.orbit_angle -= dx * 200.0
+                self.orbit_height = min(1.4, max(0.12, self.orbit_height + dy * 1.3))
+        self._drag_from = current
+
+    def toggle_pause(self) -> None:
+        self.paused = not self.paused
+
+    def toggle_mouse_look(self) -> None:
+        """Relative mouse mode is not available everywhere, so it is opt-in."""
+        self.mouse_look = not self.mouse_look
+        props = WindowProperties()
+        props.set_cursor_hidden(self.mouse_look)
+        props.set_mouse_mode(
+            WindowProperties.M_relative if self.mouse_look else WindowProperties.M_absolute
+        )
+        try:
+            self.win.request_properties(props)
+        except Exception:  # noqa: BLE001
+            self.mouse_look = False
+        self._last_pointer = None
+
+    def toggle_physics_debug(self) -> None:
+        if self.debug_np is None:
+            node = BulletDebugNode("debug")
+            node.show_wireframe(True)
+            node.show_bounding_boxes(False)
+            self.debug_np = self.render.attach_new_node(node)
+            self.world.set_debug_node(node)
+        if self.debug_np.is_hidden():
+            self.debug_np.show()
+        else:
+            self.debug_np.hide()
+
+    # ------------------------------------------------------------------
+    # Main loop
+    # ------------------------------------------------------------------
+    def _stream_anchors(self):
+        """Points that need terrain under them: the camera and every unit.
+
+        Anchoring on the units too is not optional — a unit that outruns the
+        loaded ring would have no collider beneath it and drop out of the world.
+        """
+        anchors = [(self.camera.get_x(), self.camera.get_y())]
+        if self.battle is not None:
+            focus = self.battle.focus_point()
+            anchors.append((focus.x, focus.y))
+            for unit in self.battle.alive_units():
+                anchors.append((unit.position.x, unit.position.y))
+        return anchors
+
+    def _update(self, task):
+        dt = min(self.clock.get_dt(), 0.05)
+        if not self.paused:
+            self.sim_time += dt
+            self.battle.step(dt)
+            # Fixed-step the solver so behaviour does not depend on framerate.
+            self._physics_debt += dt
+            while self._physics_debt >= PHYSICS_STEP:
+                self.world.do_physics(PHYSICS_STEP, 0)
+                self._physics_debt -= PHYSICS_STEP
+
+        self._update_camera(dt)
+        self.chunks.update(self._stream_anchors())
+        self._follow_world()
+
+        suffix = "   ·   PAUSA" if self.paused else ""
+        self.status_text.setText(self.battle.status_text() + suffix)
+        self._update_roster()
+        return task.cont
+
+    def _update_roster(self) -> None:
+        for team, text in self.roster_text.items():
+            counts = self.battle.roster(team)
+            parts = [f"{label} {counts.get(kind, 0)}" for kind, label in ROSTER]
+            text.setText(f"{TEAM_NAMES[team]:5} " + "   ".join(parts))
+
+    def _follow_world(self) -> None:
+        """Keep the camera-relative scenery (water, shadow frustum) with us."""
+        camera = self.camera.get_pos()
+        self.water.set_pos(camera.x, camera.y, self.terrain.water_level)
+
+        target = self.focus_smooth or camera
+        self.sun_np.set_pos(target.x, target.y, self.terrain.relief + 220.0)
+
+    # ------------------------------------------------------------------
+    # Camera
+    # ------------------------------------------------------------------
+    def _update_camera(self, dt: float) -> None:
+        self._apply_mouse_drag()
+        if self.camera_mode == "free":
+            self._update_free_camera(dt)
+            return
+
+        # focus_point() jumps whenever the closest enemy pair changes; ease
+        # into it so the rig pans instead of snapping across the field.
+        target_focus = Point3(self.battle.focus_point())
+        if self.focus_smooth is None:
+            self.focus_smooth = target_focus
+        else:
+            self.focus_smooth = Point3(
+                self.focus_smooth + (target_focus - self.focus_smooth) * min(1.0, 2.0 * dt)
+            )
+        focus = self.focus_smooth
+
+        self._apply_orbit_keys(dt)
+
+        if self.camera_mode == "chase":
+            alive = self.battle.alive_units()
+            if alive:
+                unit = alive[self.chase_index % len(alive)]
+                focus = Point3(unit.position)
+                behind = unit.np.get_quat().get_forward() * -26.0
+                desired = focus + behind + Vec3(0, 0, 11.0)
+                desired.z = max(desired.z, self._ground_clearance(desired.x, desired.y) + 4.0)
+                blend = min(1.0, 4.5 * dt)
+                self.camera.set_pos(
+                    self.camera.get_pos() + (desired - self.camera.get_pos()) * blend
+                )
+                self.camera.look_at(focus)
+                return
+
+        if self.camera_mode == "high":
+            radius = 260.0
+            angle = math.radians(-90.0)
+            pitch = math.radians(55.0)
+        else:
+            self.orbit_angle += dt * 5.0
+            reach = max(200.0, self.battle.focus_spread * 1.5)
+            radius = min(reach, 520.0) * self.orbit_distance
+            angle = math.radians(self.orbit_angle)
+            pitch = math.radians(12.0 + 34.0 * self.orbit_height)
+
+        # Placed exactly, not eased. Interpolating the position was a bug once:
+        # the rig chased a moving target so its real distance and pitch never
+        # matched the intended ones, and the shot collapsed into a top-down.
+        position = Point3(
+            focus.x + math.cos(angle) * radius,
+            focus.y + math.sin(angle) * radius,
+            focus.z + radius * math.tan(pitch),
+        )
+        position.z = max(position.z, self._ground_clearance(position.x, position.y) + 8.0)
+
+        self.camera.set_pos(position)
+        self.camera.look_at(focus)
+
+    def _ground_clearance(self, x: float, y: float) -> float:
+        """Never dip below the terrain, nor below the water surface."""
+        return max(self.terrain.height_at(x, y), self.terrain.water_level)
+
+    def _apply_orbit_keys(self, dt: float) -> None:
+        if "arrow_left" in self.keys:
+            self.orbit_angle -= 45.0 * dt
+        if "arrow_right" in self.keys:
+            self.orbit_angle += 45.0 * dt
+        if "arrow_up" in self.keys:
+            self.orbit_height = min(1.4, self.orbit_height + 0.5 * dt)
+        if "arrow_down" in self.keys:
+            self.orbit_height = max(0.12, self.orbit_height - 0.5 * dt)
+        if "-" in self.keys:
+            self.orbit_distance = min(2.6, self.orbit_distance + 0.7 * dt)
+        if "=" in self.keys or "+" in self.keys:
+            self.orbit_distance = max(0.28, self.orbit_distance - 0.7 * dt)
+
+    def _update_free_camera(self, dt: float) -> None:
+        heading = self.camera.get_h()
+        pitch = self.camera.get_p()
+
+        # Arrow keys always work; the mouse is a bonus, because relative mouse
+        # mode is not reliable on every windowing setup (WSL in particular).
+        look = 90.0 * dt
+        if "arrow_left" in self.keys:
+            heading += look
+        if "arrow_right" in self.keys:
+            heading -= look
+        if "arrow_up" in self.keys:
+            pitch += look
+        if "arrow_down" in self.keys:
+            pitch -= look
+
+        if self.mouse_look and self.mouseWatcherNode.has_mouse():
+            pointer = self.win.get_pointer(0)
+            current = (pointer.get_x(), pointer.get_y())
+            if self._last_pointer is not None:
+                heading -= (current[0] - self._last_pointer[0]) * 0.16
+                pitch -= (current[1] - self._last_pointer[1]) * 0.16
+            self._last_pointer = current
+
+        self.camera.set_hpr(heading, max(-88.0, min(88.0, pitch)), 0)
+
+        speed = 220.0 if "shift" in self.keys else 70.0
+        quat = self.camera.get_quat()
+        move = Vec3(0, 0, 0)
+        if "w" in self.keys:
+            move += quat.get_forward()
+        if "s" in self.keys:
+            move -= quat.get_forward()
+        if "d" in self.keys:
+            move += quat.get_right()
+        if "a" in self.keys:
+            move -= quat.get_right()
+        if "e" in self.keys:
+            move += Vec3(0, 0, 1)
+        if "q" in self.keys:
+            move -= Vec3(0, 0, 1)
+        if move.length_squared() > 1e-6:
+            move.normalize()
+            self.camera.set_pos(self.camera.get_pos() + move * speed * dt)
+
+        position = self.camera.get_pos()
+        floor = self._ground_clearance(position.x, position.y) + 3.0
+        if position.z < floor:
+            self.camera.set_z(floor)

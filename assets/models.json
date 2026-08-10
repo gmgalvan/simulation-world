@@ -1,0 +1,87 @@
+{
+  "_comment": [
+    "Ajustes por modelo. TODO es opcional: si borras este archivo, la simulación",
+    "sigue funcionando con los placeholders procedurales.",
+    "",
+    "Los modelos van en assets/models/ y se detectan por nombre de archivo:",
+    "cualquier archivo que empiece por 'helicopter' o 'tank' con extensión",
+    ".glb .gltf .obj .dae .egg .bam se carga automáticamente.",
+    "",
+    "  file    -> nombre exacto del archivo, si no quieres depender del prefijo",
+    "  length  -> tamaño final del modelo en metros (se escala solo). Es la",
+    "             opción recomendada: da igual en qué unidades venga el modelo.",
+    "  scale   -> factor de escala fijo, alternativa a 'length'",
+    "  hpr     -> [heading, pitch, roll] en grados, para corregir la orientación.",
+    "             Panda3D es Z-up y el morro debe mirar a +Y. La mayoría de",
+    "             modelos descargados son Y-up: prueba hpr [0, 90, 0].",
+    "             Si el morro apunta hacia atrás, suma 180 al heading.",
+    "  offset  -> [x, y, z] para recentrar a mano si hace falta",
+    "  center  -> true (por defecto) recentra el modelo en su propio bounding box",
+    "  tint    -> true (por defecto) tiñe el modelo con el color del equipo.",
+    "             Ponlo en false si tu modelo ya trae texturas propias y no",
+    "             quieres que se le aplique el rojo/azul encima.",
+    "  nodes   -> nombres de las piezas a animar dentro del modelo. Abre el",
+    "             archivo en Blender para ver cómo se llaman sus objetos."
+  ],
+
+  "helicopter": {
+    "length": 11.0,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true,
+    "nodes": {
+      "main_rotor": "MainRotor",
+      "tail_rotor": "TailRotor"
+    }
+  },
+
+  "tank": {
+    "length": 8.0,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true,
+    "nodes": {
+      "turret": "Turret"
+    }
+  },
+
+  "rifleman": {
+    "length": 2.4,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true
+  },
+
+  "rocket": {
+    "length": 2.4,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true
+  },
+
+  "jet": {
+    "length": 15.0,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true
+  },
+
+  "sam": {
+    "length": 8.5,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true,
+    "nodes": { "turret": "Turret" }
+  },
+
+  "osprey": {
+    "length": 16.0,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true,
+    "nodes": {
+      "nacelle_left": "NacelleLeft",
+      "nacelle_right": "NacelleRight"
+    }
+  }
+}

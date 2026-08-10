@@ -1,0 +1,328 @@
+# simulation-world 🚁🪖
+
+Batalla 3D autónoma en un **mundo abierto infinito**, con **física de cuerpo
+rígido real (Bullet)** y render en **Panda3D**.
+
+Dos equipos (rojo y azul) se despliegan enfrentados, se buscan solos y combaten
+hasta que uno queda en pie. Siete tipos de unidad: **fusileros** (AK-47),
+**equipos de RPG**, tanque, **batería antiaérea**, helicóptero de ataque,
+**convertiplano tipo V-22** (tiltrotor) y **caza furtivo tipo F-35**.
+
+## Qué hace
+
+**Mundo infinito.** El terreno no tiene bordes: se genera por *chunks* según
+hacen falta y se descarta lo que queda atrás. La clave es que la altura es una
+**función pura de las coordenadas del mundo** — dos chunks vecinos evalúan la
+misma función en su borde común, así que encajan sin grietas y sin llevar
+ninguna contabilidad. Además permite consultar la altura en cualquier punto,
+incluso de terreno no cargado, que es de lo que dependen la IA y la balística.
+
+La geometría de cada chunk se construye **volcando un array de numpy directo al
+buffer de vértices** (`v3n3c4` = 28 bytes por vértice) en vez de escribir
+vértice a vértice: 2.4 ms por chunk en lugar de cientos. La *misma* malla se usa
+para dibujar y para colisionar, así que visual y física no se pueden desalinear.
+
+Se cargan dos radios distintos a propósito: todo lo que entra en el radio de
+visión se dibuja, pero solo el radio interior recibe collider de Bullet —
+construirlos es lo caro y solo las unidades y los proyectiles los necesitan.
+
+**Relieve y agua.** El campo de batalla se mantiene **seco**: los ríos y lagos
+se atenúan dentro de un radio alrededor del origen (`--clear-radius`, 420 m por
+defecto) y aparecen a partir de ahí. Un río cruzando por en medio simplemente
+ahoga a los terrestres, que no tienen más remedio que vadearlo. Medido: 0% de
+agua hasta 300 m del centro, ~25% a 420 m.
+
+Una máscara de baja frecuencia decide dónde el mundo es llanura y dónde cordillera, así que un mundo infinito tiene regiones en vez de
+ruido uniforme. Los **ríos** salen del conjunto de nivel de un campo suave (esa
+curva es justo la planta de un río) y se tallan hundiendo el terreno bajo la
+línea de agua; los lagos, de un campo de cuencas. Reparto típico: ~10% agua,
+50% llanura, 20% colinas, 18% montaña con picos nevados a ~90 m.
+
+**Modelos.** Los placeholders no son solo cajas: hay un constructor de
+**superficies lofteadas** (`make_loft`) que une secciones transversales, que es
+como se modela bien en low-poly. Con cajas no se puede describir un ala en
+flecha ni un fuselaje con *chines*; con secciones sí, y sigue siendo una cara
+plana por cuadrilátero, así que el resultado no se sale del estilo facetado.
+
+Con eso están hechos el caza (silueta de **F-35**: morro con chines, canopy,
+tomas laterales, colas inclinadas), el tanque (**Leopard 2**: glacis inclinado,
+torre en cuña, cañón de 120 mm con manguito térmico, faldones) y el helicóptero
+(**Mi-24**: doble burbuja en tándem, alas cortas con anhedro y pilones, torreta
+bajo el morro, rotor de cinco palas).
+
+**Vegetación.** Bosque low-poly generado por chunk, sembrado desde una semilla
+derivada de las coordenadas del chunk: un trozo de mundo **vuelve a crecer
+exactamente igual** cada vez que se recarga. No crecen en el agua, en la playa
+ni por encima de la cota de nieve. Todos los árboles de un chunk se funden en un
+único `Geom` (una sola llamada de dibujado) y son **decorativos**: no entran al
+mundo de Bullet, porque darles collider a cientos taparía los raycasts de línea
+de visión por todas partes y atascaría la batalla.
+
+**Física.** Bullet lleva gravedad, contactos, balística y escombros. Sobre eso:
+
+- Los **helicópteros** no vuelan "por arte de magia": tienen un modelo de vuelo
+  escrito a mano (controlador PD de altura que compensa el peso y corrige sobre
+  el terreno) que se inyecta a Bullet **como fuerzas**. Un motor de cuerpo
+  rígido no sabe nada de rotores — así se hace también en juegos reales.
+  Operan a 38-54 m sobre el suelo, bastante por encima de las copas.
+- Los **tanques** son cuerpos rígidos de 4.2 t que conducen por fuerzas.
+- Los **proyectiles no están dentro del mundo físico**, y es a propósito: si un
+  obús es un cuerpo rígido, el solver le resuelve el contacto y **rebota**
+  visiblemente contra lo que debía destruir. Su movimiento es una integración de
+  dos líneas (gravedad, o guiado propio en el caso del misil) y todos los
+  impactos los encuentra un **rayo barrido** entre la posición anterior y la
+  actual, que además evita que un obús rápido atraviese nada. Sacarlos del mundo
+  físico subió los impactos de 20/30 a **30/30** en banco de pruebas.
+  El barrido recorre *todos* los impactos y descarta el propio proyectil, a
+  quien lo disparó y los escombros: quedarse con el más cercano sin filtrar hace
+  que cada obús detone contra sí mismo en el primer frame.
+- La IA de tiro resuelve el ángulo del obús (arco bajo) **anticipando** el
+  movimiento del blanco. Un impacto de 120 mm **mata a un soldado de un tiro**,
+  sea fusilero o equipo de RPG; los equipos antitanque sobreviven porque
+  **superan en alcance al tanque** (112 m contra 78) y disparan primero, no
+  porque aguanten un obús.
+- Cada arma dispara como corresponde: los **tanques y los equipos de RPG paran
+  para tirar** (`fire_halt`) y vuelven a moverse entre disparo y disparo — alto,
+  fuego, avance —, mientras el **fusilero dispara en movimiento** y los
+  helicópteros y convertiplanos siguen maniobrando en todo momento. El alto es
+  bastante más corto que la recarga, así que avanzan igual: un tanque pasa ~10%
+  del tiempo detenido, no clavado.
+- Como aquí nada flota, los terrestres **sondean el terreno por delante** y
+  esquivan tanto el agua como las **cuestas que no pueden subir** (más de 29°).
+  Medido: antes esquivaban solo el agua y el 100% de los atascos eran contra
+  una ladera. Encima llevan un **detector de atasco** — si quieren avanzar y
+  llevan 1.5 s sin moverse, se desvían unos segundos — que cubre cualquier
+  causa que el sondeo no vea. Atascos: 1.3% → **0%**.
+- La **infantería** corre, se tumba con la pendiente y esquiva el agua igual
+  que los tanques. Los **fusileros** son baratos y numerosos, con mucha cadencia
+  y poco alcance; los **equipos de RPG** son pocos y lentos de recargar, pero
+  disparan un cohete con estela de humo que sí revienta un blindado.
+- Cada tipo tiene su propia **ganancia de empuje** (`drive_gain`). No es un
+  detalle: la fuerza de avance se equilibra con el rozamiento del suelo en
+  `cruise_speed − μg/ganancia`, así que una ganancia baja deja a la unidad muy
+  por debajo de su velocidad nominal por mucho que se suba `cruise_speed`. Con
+  la ganancia de los tanques heredada, los soldados corrían a 2.7 m/s de 7.
+- El **caza** es el único que **no puede quedarse quieto**. Su controlador no es
+  el de los rotores: el empuje va siempre hacia el morro, no hacia el objetivo,
+  así que sobrepasa el blanco y tiene que dar la vuelta — de ahí salen las
+  pasadas de ataque, que son emergentes y no una animación guionizada. Vuela muy
+  alto y ataca con **misiles guiados**, no con cañón; solo dispara dentro de un
+  cono de 30° en planta, alabea fuerte al virar y lleva postcombustión.
+- La **batería antiaérea** es la respuesta desde tierra: alcance largo y letal
+  contra aeronaves, pero contra objetivos terrestres apenas hace un 14-30% del
+  daño. Ese resto **no es cero a propósito**: una unidad puramente antiaérea que
+  no pueda dañar a nadie en tierra jamás termina una batalla, y dos baterías
+  frente a frente se quedarían atascadas para siempre.
+- El **convertiplano** bascula sus góndolas: horizontal (modo avión) para el
+  traslado, donde vuela un 135% más rápido, y vertical al entrar en combate.
+  El basculado es una animación real de las góndolas, no un cambio de textura.
+  Ojo: el V-22 real es un **transporte**, no un cañonero, así que está
+  modelado como rápido y resistente pero poco armado y menos ágil.
+- Al morir, la unidad **suelta la restricción de rotación** y el pecio cae y
+  da vueltas de verdad antes de reventar.
+
+**IA.** Cada unidad elige blanco, se acerca, comprueba **línea de visión** con
+un raycast y dispara. Mantiene el blanco hasta que muere o se aleja
+(sin esa persistencia el fuego se concentra y la batalla se vuelve una paliza).
+Si el terreno le tapa el tiro, cierra distancia en vez de orbitar una colina.
+La puntería cae con la distancia. Cada tipo prioriza lo que puede matar de
+verdad (tabla `PREFERENCE`): los tanques se buscan entre ellos en vez de
+malgastar obuses contra helicópteros que orbitan, algo que un proyectil
+balístico casi nunca alcanza, y todo el mundo trata de eliminar a los equipos
+de RPG primero.
+
+Además hay una tabla `DAMAGE_VS` de daño por tipo de blanco. Sin ella, un pelotón
+de fusileros derriba tanques a base de volumen de fuego y llevar lanzacohetes
+deja de tener sentido: un AK hace el **10%** de daño contra blindaje, mientras
+que el RPG está hecho para eso.
+
+**Misiles guiados.** Tienen su propio módulo y su propia clase, porque un misil
+no es una piedra con campos extra: tiene motor con tiempo de combustión, buscador
+con campo de visión, límite de maniobra del fuselaje, espoleta de proximidad y
+una ley de guiado. La ley es **navegación proporcional**, la que usan los misiles
+reales: en vez de apuntar al blanco (persecución pura, que se va a la cola y
+pierde cualquier cosa rápida que cruce), ordena aceleración lateral proporcional
+a la *velocidad de giro de la línea de visión*. Anular esa rotación es
+exactamente la condición de colisión — si la demora deja de cambiar mientras la
+distancia se acorta, vas a impactar — y por eso anticipa al blanco sin calcular
+nunca un punto de intercepción.
+
+Medido contra un caza en viraje sostenido, con el mismo presupuesto de maniobra:
+
+| Límite de maniobra | Persecución pura | Navegación proporcional |
+|---|---|---|
+| 6 g | 0% | 19% |
+| 8 g | 2.8% | 47% |
+| 11 g (el que usa el juego) | 14% | **75%** |
+| 18 g | 83% | 100% |
+
+**Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
+zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
+coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
+bastante más fiable entre sistemas de ventanas.
+
+**HUD.** Marcador con las bajas de cada bando y una **leyenda por tipo de
+unidad**, en el color del equipo, para leer de un vistazo qué le queda a cada
+uno en vez de solo un total.
+
+**Efectos.** Trazadoras, fogonazos, explosiones, escombros con física propia,
+columnas de humo en unidades dañadas, barras de vida y sombras del sol.
+
+La infantería **sangra en vez de explotar**: los impactos dejan salpicaduras y
+la muerte una descarga de partículas rojas con arco balístico propio, calculado
+a mano en lugar de con Bullet (una baja lanza una docena y no necesitan chocar
+con nada). Van con blending normal, **no aditivo** como las explosiones — la
+sangre no debe brillar. Los vehículos siguen ardiendo y humeando; los cuerpos
+solo quedan tendidos.
+
+**Cámara.** Cuatro modos (tecla `C`): órbita, persecución, cenital y **libre**.
+Los automáticos enfocan la **pareja de enemigos más cercana** — el centroide de
+todas las unidades cae en terreno vacío a medio camino entre los dos bandos y
+deja el combate fuera de plano. Suavizan el paneo y abren el encuadre cuando esa
+pareja está separada. La posición se calcula de forma exacta a partir del ángulo
+deseado en lugar de interpolarse: al interpolarla, la distancia y el ángulo
+reales nunca coinciden con los buscados y el plano acaba cenital.
+
+En modo **libre** vuelas tú por el mundo y el terreno se va generando por
+delante. La niebla está ajustada al radio de carga para que los chunks aparezcan
+dentro de la bruma en vez de a la vista.
+
+## Requisitos
+
+- [`uv`](https://docs.astral.sh/uv/).
+- OpenGL 3.2+. En WSL2 con WSLg funciona sin configurar nada (aquí corre
+  acelerado por hardware vía D3D12 → Mesa). Sin entorno gráfico, usa `--shots`.
+
+## Ejecutar
+
+```bash
+uv sync
+uv run main.py
+```
+
+| Tecla | Acción |
+|---|---|
+| Arrastrar ratón | Girar la cámara |
+| Rueda | Zoom (o avanzar, en modo libre) |
+| `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |
+| `R` | Nueva batalla |
+| `ESPACIO` | Pausa |
+| `F` | Ver los colliders de Bullet (wireframe) |
+| `ESC` | Salir |
+
+Cámaras automáticas: `←` `→` giran, `↑` `↓` suben/bajan, `+` `-` hacen zoom.
+
+**Cámara libre**: `WASD` moverse, `Q`/`E` bajar/subir, flechas mirar,
+`SHIFT` para ir rápido, `M` activa el ratón (opcional: el modo relativo de ratón
+no funciona en todos los entornos, por eso mirar con las flechas siempre va).
+
+### Sin ventana (headless)
+
+Simula y guarda capturas PNG. Útil sin entorno gráfico o para revisar una
+batalla concreta:
+
+```bash
+uv run main.py --shots 8 --shot-interval 4 --shots-dir shots
+```
+
+### Opciones
+
+```bash
+uv run main.py --help
+```
+
+| Opción | Por defecto | Qué hace |
+|---|---|---|
+| `--seed N` | `0` | Semilla del mundo y del despliegue |
+| `--n-heli N` | `3` | Helicópteros por equipo |
+| `--n-tanks N` | `4` | Tanques por equipo |
+| `--n-jets N` | `4` | Cazas F-35 por equipo |
+| `--n-sam N` | `2` | Baterías antiaéreas por equipo |
+| `--n-rifles N` | `6` | Fusileros (AK-47) por equipo |
+| `--n-rockets N` | `3` | Equipos de RPG por equipo. Hacen falta ~3 por tanque enemigo |
+| `--n-osprey N` | `1` | Convertiplanos por equipo (`0` para ninguno) |
+| `--relief N` | `46` | Altura máxima del relieve |
+| `--clear-radius N` | `420` | Radio sin ríos alrededor del combate (`0` los permite en medio) |
+| `--feature-scale N` | `220` | Escala de los accidentes. Más alto = valles y sierras más amplios |
+| `--view-chunks N` | `5` | Radio de terreno cargado, en chunks. Más = ves más lejos y cuesta más |
+| `--chunk-size N` | `128` | Lado de cada chunk en metros |
+| `--trees N` | `110` | Árboles **por chunk** (`0` para ninguno) |
+| `--deploy N` | `240` | Separación inicial entre los dos bandos |
+| `--resolution AxB` | `1600x900` | Tamaño de ventana o captura |
+| `--assets DIR` | `./assets` | Carpeta de modelos |
+
+Batalla grande y mucha distancia de visión:
+
+```bash
+uv run main.py --n-heli 6 --n-tanks 10 --n-osprey 2 --n-rifles 14 --n-rockets 5 \
+  --view-chunks 7 --seed 12
+```
+
+Solo infantería, sin blindados ni aire:
+
+```bash
+uv run main.py --n-heli 0 --n-tanks 0 --n-osprey 0 --n-rifles 16 --n-rockets 3
+```
+
+Lomas suaves y pocos árboles (buen equilibrio para ver la batalla):
+
+```bash
+uv run main.py --relief 26 --feature-scale 150 --trees 22
+```
+
+Mundo pelado, sin árboles y casi llano:
+
+```bash
+uv run main.py --trees 0 --relief 18
+```
+
+Alta montaña nevada (queda espectacular, pero tapa mucho el combate):
+
+```bash
+uv run main.py --relief 62 --feature-scale 120 --trees 22
+```
+
+Sobre el relieve: los picos llegan a unas **2.1 veces** `--relief`, y la nieve
+empieza a 52 m sobre el agua. Por eso `--relief 26` da lomas verdes y
+`--relief 62` te llena el mundo de cumbres blancas. `--feature-scale` cambia el
+*tamaño* de los accidentes, no su altura: bajarlo da montañitas frecuentes,
+subirlo da valles y sierras más amplios.
+
+## Modelos propios
+
+Arranca sin ningún asset: si `assets/models/` está vacío, cada unidad se
+construye con cajas procedurales. **Suelta un `.glb` o un `.obj` ahí y se usa
+automáticamente** — se detecta por nombre, se escala solo al tamaño correcto y
+se le aplica el color del equipo.
+
+Guía completa (dónde descargar CC0, qué formato, cómo corregir orientación y
+qué hace falta para que giren rotor y torreta): [`assets/README.md`](assets/README.md).
+
+Al arrancar, la consola dice qué se cargó:
+
+```
+[assets] helicopter  -> helicopter.glb
+[assets] tank        -> placeholder procedural
+```
+
+## Estructura
+
+```
+main.py                         # punto de entrada
+assets/
+  README.md                     # guía para meter modelos reales
+  models.json                   # escala / orientación / nombres de piezas
+  models/                       # tus .glb / .obj aquí
+src/simulation_world/
+  terrain.py                    # ruido infinito -> malla + collider por chunk
+  chunks.py                     # streaming: carga/descarga alrededor de la accion
+  scenery.py                    # bosque low-poly procedural (fundido en un Geom)
+  assets.py                     # carga de modelos y placeholders procedurales
+                                #   (soldado, tanque, helicóptero, convertiplano)
+  missiles.py                   # misiles guiados: navegación proporcional
+  entities.py                   # Unit: cuerpo rígido + modelo de vuelo/conducción
+  effects.py                    # trazadoras, obuses, explosiones, escombros
+  battle.py                     # IA de combate, disparo, bajas, victoria
+  app.py                        # ventana, luces, cámara, HUD, bucle principal
+  simulation.py                 # CLI
+```
