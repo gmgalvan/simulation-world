@@ -32,7 +32,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-jets",
         type=int,
-        default=4,
+        default=14,
         help="Cazas F-35 por equipo. No pueden quedarse quietos: hacen pasadas de ataque.",
     )
     parser.add_argument(
