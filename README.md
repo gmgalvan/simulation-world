@@ -173,9 +173,34 @@ zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
 coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
 bastante más fiable entre sistemas de ventanas.
 
+**Informe de batalla.** Al terminar, escribe un `.txt` en `informes/` con las
+fuerzas desplegadas, disparos y misiles por tipo, **precisión de cada unidad** y
+la matriz completa de quién destruyó a quién. Vive en su propio módulo
+(`stats.py`) porque contar cosas no tiene nada que ver con simular: solo observa.
+
 **HUD.** Marcador con las bajas de cada bando y una **leyenda por tipo de
 unidad**, en el color del equipo, para leer de un vistazo qué le queda a cada
 uno en vez de solo un total.
+
+**Guerra naval.** El mar corre a ambos lados del campo, así que cada flota
+queda detrás de su propia línea y dispara por encima de ella. El **destructor**
+lleva misiles de 1200 m contra aire y tierra. El **submarino** navega sumergido
+—91% del tiempo en las mediciones— y **solo emerge para lanzar** su salva de
+crucero, que alcanza cualquier objetivo terrestre del mundo cada cuatro minutos.
+Esa arma vivía antes en el destructor, donde un alcance sin límite tenía mucho
+menos sentido.
+
+Ambas flotas comparten **el mismo canal de mar**, separadas a lo largo de él, y
+navegan al encuentro. Repartirlas entre los dos mares laterales con tierra en
+medio hacía que no pudieran alcanzarse con nada salvo la salva, y una partida
+que acababa solo con unidades navales **se quedaba atascada para siempre**.
+
+El submarino **solo es visible para aeronaves, otros submarinos y destructores**
+(cazar submarinos es justo para lo que existe un destructor): nada más
+en la simulación lleva sonar, así que para un tanque o un fusilero sencillamente
+no está ahí. Contra blancos a flote usa **torpedos**: lentos, poco maniobreros, pero un
+impacto en el casco es casi decisivo, y dejan estela de espuma en la superficie.
+Contra tierra no tiene nada salvo la salva.
 
 **Efectos.** Trazadoras, fogonazos, explosiones, escombros con física propia,
 columnas de humo en unidades dañadas, barras de vida y sombras del sol.
@@ -258,7 +283,12 @@ uv run main.py --help
 | `--seed N` | `0` | Semilla del mundo y del despliegue |
 | `--n-heli N` | `3` | Helicópteros por equipo |
 | `--n-tanks N` | `4` | Tanques por equipo |
+| `--n-destroyers N` | `1` | Destructores lanzamisiles por equipo; navegan solo por los dos mares laterales y atacan aire/tierra a gran alcance |
+
+Los destructores seleccionan su arma automáticamente: misil guiado para blancos a más de 310 m, cañón naval de 127 mm a distancia media y CIWS/ametralladoras contra amenazas cercanas (menos de 82 m).
+Además, cada destructor prepara durante 4 minutos una salva estratégica de hasta 3 misiles. Al quedar lista, ataca unidades terrestres enemigas en cualquier punto activo del mundo, sin límite táctico de alcance ni línea de visión. La trayectoria se calcula en `missiles.py`: lanzamiento vertical, arco parabólico guiado con 220 m de altura adicional nominal y picado terminal con navegación proporcional. En modo inspección se muestra la cuenta regresiva.
 | `--n-jets N` | `4` | Cazas F-35 por equipo |
+| `--n-submarines N` | `1` | Submarinos lanzamisiles por equipo |
 | `--n-sam N` | `2` | Baterías antiaéreas por equipo |
 | `--n-rifles N` | `6` | Fusileros (AK-47) por equipo |
 | `--n-rockets N` | `3` | Equipos de RPG por equipo. Hacen falta ~3 por tanque enemigo |

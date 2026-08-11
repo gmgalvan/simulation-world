@@ -9,8 +9,26 @@ from panda3d.core import NodePath, Point3, Vec3
 
 from .assets import make_health_bar
 from .effects import Effects
-from .missiles import AIR_TO_GROUND, SURFACE_TO_AIR
-from .entities import FIXED_WING, GRAVITY, INFANTRY, SPECS, Unit
+from .stats import BattleStats
+from .missiles import (
+    AIR_TO_GROUND,
+    NAVAL_STRIKE,
+    STRATEGIC_STRIKE,
+    SURFACE_TO_AIR,
+    TORPEDO,
+)
+from .entities import (
+    DETECTS_SUBSURFACE,
+    SURFACING_SECONDS,
+    FIXED_WING,
+    GRAVITY,
+    GROUND,
+    INFANTRY,
+    NAVAL,
+    SPECS,
+    SUBSURFACE,
+    Unit,
+)
 
 TEAM_COLORS = {
     0: (0.92, 0.26, 0.24, 1.0),
@@ -24,6 +42,10 @@ WRECK_LIFETIME = 4.0
 # How far around the closest contact still counts as the same engagement,
 # for camera framing purposes.
 ENGAGEMENT_RADIUS = 190.0
+# Battles run about a minute, so a four-minute cycle meant the boat fired
+# once and never again. This gets a second and third salvo into a long one.
+STRATEGIC_SALVO_PERIOD = 55.0
+STRATEGIC_SALVO_SIZE = 3
 
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
 # is more attractive, missing pairs default to 1.0. Tanks must not chase
@@ -86,6 +108,23 @@ PREFERENCE = {
     ("tank", "sam"): 0.7,
     ("rocket", "sam"): 0.6,
     ("rifleman", "sam"): 1.0,
+    # The destroyer is a broad-area air/land missile platform. It favours the
+    # aircraft that can threaten its fleet, then armoured shore targets.
+    ("destroyer", "jet"): 0.35,
+    ("destroyer", "helicopter"): 0.45,
+    ("destroyer", "osprey"): 0.42,
+    ("destroyer", "sam"): 0.65,
+    ("destroyer", "tank"): 0.7,
+    ("destroyer", "rocket"): 0.9,
+    ("destroyer", "rifleman"): 1.0,
+    # Deliberately unattractive: a destroyer is a dedicated SAM platform, and
+    # jets that preferred it flew straight into the fleet's air defence and
+    # were shot to pieces. Their war is over the land.
+    ("jet", "destroyer"): 2.4,
+    ("jet", "submarine"): 2.6,
+    ("helicopter", "destroyer"): 2.2,
+    ("helicopter", "submarine"): 2.4,
+    ("rocket", "destroyer"): 1.2,
 }
 
 # Damage multiplier by (shooter kind, target kind); missing pairs are 1.0.
@@ -117,6 +156,8 @@ DAMAGE_VS = {
     ("sam", "rifleman"): 0.30,
     ("sam", "rocket"): 0.30,
     ("sam", "sam"): 0.20,
+    ("rifleman", "destroyer"): 0.08,
+    ("destroyer", "rifleman"): 1.5,
 }
 
 
@@ -145,6 +186,8 @@ class Battle:
         n_sam: int = 2,
         n_rifles: int = 6,
         n_rockets: int = 3,
+        n_destroyers: int = 1,
+        n_submarines: int = 1,
         seed: int = 0,
         deploy_radius: float = 240.0,
         origin: tuple[float, float] = (0.0, 0.0),
@@ -163,10 +206,16 @@ class Battle:
         self.elapsed = 0.0
         self.kills = {0: 0, 1: 0}
         self.focus_spread = 0.0
+        # Which side's sea both fleets share this battle.
+        self.naval_lane = 1.0 if random.Random(seed).random() < 0.5 else -1.0
+        self.stats = BattleStats(seed)
         self.deploy_radius = deploy_radius
         self.origin = origin
 
-        self._spawn(n_heli, n_tanks, n_osprey, n_jets, n_sam, n_rifles, n_rockets)
+        self._spawn(
+            n_heli, n_tanks, n_osprey, n_jets, n_sam, n_rifles, n_rockets,
+            n_destroyers, n_submarines,
+        )
 
     # ------------------------------------------------------------------
     # Setup
@@ -180,6 +229,8 @@ class Battle:
         n_sam: int = 0,
         n_rifles: int = 0,
         n_rockets: int = 0,
+        n_destroyers: int = 0,
+        n_submarines: int = 0,
     ) -> None:
         # The world has no edges any more, so deployment is a radius around an
         # origin rather than a fraction of the map.
@@ -210,14 +261,31 @@ class Battle:
                 unit.tilt = 1.0  # start in airplane mode, inbound
 
             for i in range(n_jets):
-                x = ox + sign * self.rng.uniform(half * 1.2, half * 1.7)
-                y = oy + self.rng.uniform(-plain_half, plain_half)
+                # In from the north and the south, over the land corridor. They
+                # used to launch on their team's side in X, which is where the
+                # sea lane is: every jet started inside the enemy destroyer's
+                # missile envelope and simply flew into the fleet's air defence.
+                x = ox + self.rng.uniform(-plain_half, plain_half)
+                y = oy + sign * self.rng.uniform(half * 1.6, half * 2.2)
                 cruise = 135.0 + i * 16.0
                 z = max(self.terrain.height_at(x, y), self.terrain.water_level) + cruise
                 jet = self._make_unit("jet", team, color, Vec3(x, y, z), heading)
                 jet.cruise_alt = cruise
                 # Already at speed: a jet spawning from rest just falls.
                 jet.node.set_linear_velocity(jet.forward * SPECS["jet"].cruise_speed)
+
+            for i in range(n_destroyers):
+                x, y = self._side_sea_spot(sign, i)
+                # Match Unit.update_naval's fixed waterline from frame one.
+                z = self.terrain.water_level + 0.78
+                ship = self._make_unit("destroyer", team, color, Vec3(x, y, z), heading)
+                ship.orbit_dir = 1.0 if i % 2 == 0 else -1.0
+
+            for i in range(n_submarines):
+                x, y = self._side_sea_spot(sign, i + 3)
+                z = self.terrain.water_level + 0.30
+                boat = self._make_unit("submarine", team, color, Vec3(x, y, z), heading)
+                boat.orbit_dir = 1.0 if i % 2 == 0 else -1.0
 
             for i in range(n_tanks):
                 x, y = self._dry_spot(
@@ -296,6 +364,29 @@ class Battle:
                 return nx, ny
         return fallback if fallback is not None else (x, y)
 
+    def _side_sea_spot(self, sign: float, index: int) -> tuple[float, float]:
+        """Deploy a hull in the shared sea lane, on its team's end of it.
+
+        Both fleets use the *same* stretch of water, separated along it rather
+        than placed in the seas on opposite sides of the map. Split between two
+        seas with land in between they could never reach each other with
+        anything but the strategic salvo, and a naval-only endgame simply
+        stalled — which is exactly what happened.
+        """
+        ox, oy = self.origin
+        water = self.terrain.water_level
+        shore = getattr(self.terrain, "sea_end", self.deploy_radius * 2.0)
+        # One lane, chosen per battle, so the fleets always share a sea.
+        lane = self.naval_lane
+
+        for attempt in range(120):
+            nx = ox + lane * (shore + 60.0 + self.rng.uniform(0.0, 110.0))
+            # Red steams up the lane, blue steams down it; they meet in between.
+            ny = oy + sign * (300.0 + index * 55.0 + self.rng.uniform(0.0, 90.0))
+            if self.terrain.height_at(nx, ny) < water - 1.0:
+                return nx, ny
+        raise RuntimeError("No se encontró agua para desplegar la unidad naval.")
+
     def _make_unit(self, kind: str, team: int, color, position: Vec3, heading: float) -> Unit:
         spec = SPECS[kind]
         model = self.assets.get(kind, color)
@@ -343,6 +434,7 @@ class Battle:
         unit.health_fill = bar_fill
 
         self.units.append(unit)
+        self.stats.deploy(kind, team)
         return unit
 
     # ------------------------------------------------------------------
@@ -423,10 +515,23 @@ class Battle:
         ceiling = self.terrain.height_at(point.x, point.y) + 18.0
         return Point3(point.x, point.y, min(point.z, ceiling))
 
+    def _can_detect(self, observer: Unit, target: Unit) -> bool:
+        """Whether `observer` can even see `target`.
+
+        Only aircraft and other submarines can find a submerged boat; nothing
+        else in this simulation carries sonar, so for a tank or a rifleman it
+        may as well not be there.
+        """
+        if target.kind in SUBSURFACE:
+            return observer.kind in DETECTS_SUBSURFACE
+        return True
+
     def _pick_target(self, unit: Unit) -> Unit | None:
         best, best_score = None, float("inf")
         for other in self.units:
             if not other.alive or other.team == unit.team:
+                continue
+            if not self._can_detect(unit, other):
                 continue
             distance = (other.position - unit.position).length()
             # Weight by what this shooter can realistically kill, and jitter so
@@ -447,7 +552,7 @@ class Battle:
         concentrates on one victim and the battle snowballs into a shutout.
         """
         current = unit.target
-        if current is not None and current.alive:
+        if current is not None and current.alive and self._can_detect(unit, current):
             distance = (current.position - unit.position).length()
             if distance <= unit.spec.attack_range * 1.6:
                 return current
@@ -486,10 +591,28 @@ class Battle:
                 unit.update_osprey(dt, self.terrain, target, engaged)
             elif unit.kind == "jet":
                 unit.update_jet(dt, self.terrain, target, engaged)
+            elif unit.kind in NAVAL:
+                unit.update_naval(dt, self.terrain, target, engaged)
+            elif unit.kind in NAVAL:
+                unit.update_naval(dt, self.terrain, target, engaged)
             else:
                 unit.update_ground(dt, self.terrain, target, engaged)
 
             self._animate(unit, dt)
+
+            if unit.kind == "submarine":
+                unit.strategic_cooldown -= dt
+                if unit.strategic_cooldown <= 0.0 and not unit.pending_salvo:
+                    # Order the boat up first; the salvo waits until the tubes
+                    # are actually clear of the water.
+                    unit.pending_salvo = True
+                    unit.surface_time = SURFACING_SECONDS
+                if unit.pending_salvo and unit.is_surfaced(self.terrain.water_level):
+                    if self._fire_strategic_salvo(unit):
+                        unit.strategic_cooldown = STRATEGIC_SALVO_PERIOD
+                    else:
+                        unit.strategic_cooldown = 20.0
+                    unit.pending_salvo = False
 
             unit.cooldown -= dt
             if engaged and unit.cooldown <= 0.0:
@@ -509,6 +632,44 @@ class Battle:
         self.effects.update(dt, self._apply_damage)
         self._update_wrecks(dt)
         self._check_winner()
+
+    def _fire_strategic_salvo(self, unit: Unit) -> bool:
+        """Cruise-missile salvo at land targets anywhere, ignoring range and LOS.
+
+        This lives on the submarine rather than the destroyer: a weapon with no
+        practical limit on reach is what a missile boat exists for, and a
+        surface combatant having one made much less sense.
+        """
+        enemies = [o for o in self.units if o.alive and o.team != unit.team]
+        targets = [o for o in enemies if o.kind in GROUND]
+        if not targets:
+            # Nothing ashore left. Fall back to whatever is out there, or two
+            # navies in separate seas simply stare at each other forever —
+            # neither can reach the other with anything but this.
+            targets = enemies
+        if not targets:
+            return False
+
+        # Prefer valuable armour/air-defence while still including distance so
+        # a salvo does not always converge on the same class of target.
+        targets.sort(
+            key=lambda target: (
+                (target.position - unit.position).length()
+                * PREFERENCE.get((unit.kind, target.kind), 1.0),
+                target.id,
+            )
+        )
+        selected = targets[:STRATEGIC_SALVO_SIZE]
+        offsets = (-0.9, 0.0, 0.9)
+        for index, target in enumerate(selected):
+            self.effects.launch_missile(
+                unit, target, STRATEGIC_STRIKE, rack_offset=offsets[index]
+            )
+        self.stats.salvo(unit.kind, unit.team, len(selected))
+        for _ in selected:
+            self.stats.missile(unit.kind, unit.team, "misil de crucero")
+            self.stats.shot(unit.kind, unit.team)
+        return True
 
     def _animate(self, unit: Unit, dt: float) -> None:
         """Cosmetic-only motion: never touches the rigid body."""
@@ -561,6 +722,17 @@ class Battle:
             roll = unit.model_np.get_r() + (target_roll - unit.model_np.get_r()) * min(1.0, 4.0 * dt)
             pitch = unit.model_np.get_p() + (target_pitch - unit.model_np.get_p()) * min(1.0, 4.0 * dt)
             unit.model_np.set_hpr(0, pitch, roll)
+            return
+
+        if unit.kind in NAVAL:
+            # A hull rides level on the water; terrain-normal tilting is only
+            # for wheeled/tracked units and makes a ship pitch into the seabed.
+            unit.model_np.set_p(0)
+            unit.model_np.set_r(0)
+            if not unit.turret.is_empty() and unit.target is not None:
+                unit.turret.look_at(self.render, unit.target.position)
+                unit.turret.set_p(0)
+                unit.turret.set_r(0)
             return
 
         # Ground units: lean onto the slope. The rigid body stays yaw-locked,
@@ -633,16 +805,74 @@ class Battle:
 
     def _fire(self, unit: Unit, target: Unit) -> None:
         unit.cooldown = unit.spec.fire_period * self.rng.uniform(0.85, 1.15)
+        self.stats.shot(unit.kind, unit.team)
         # Armour and launcher teams shoot from a halt; the halt outlives the
         # shot slightly so it reads as "stop, fire, move on" rather than a stutter.
         unit.halt = unit.spec.fire_halt
         muzzle = unit.muzzle()
 
+        if unit.kind == "destroyer":
+            # A Burke-style destroyer does not waste a cruise missile on a
+            # target it can reach with its Mk 45 or its close-in guns. This is
+            # automatic weapon selection; the battle remains autonomous.
+            distance = (target.position - unit.position).length()
+            if distance <= 82.0:
+                unit.cooldown = 0.16 * self.rng.uniform(0.85, 1.15)
+                muzzle = unit.naval_ciws_muzzle()
+                spread = 2.0 + distance * 0.025
+                aim = target.position + Vec3(
+                    self.rng.uniform(-spread, spread),
+                    self.rng.uniform(-spread, spread),
+                    self.rng.uniform(-spread, spread),
+                )
+                self.effects.tracer(muzzle, aim, TEAM_COLORS[unit.team])
+                self.effects.muzzle_flash(muzzle, scale=0.34)
+                if self.rng.random() < 0.72:
+                    self._apply_damage(unit, target, 11.0 * self.rng.uniform(0.75, 1.2))
+                return
+            if distance <= 310.0:
+                unit.cooldown = 2.1 * self.rng.uniform(0.85, 1.15)
+                muzzle = unit.naval_gun_muzzle()
+                delta = target.position - muzzle
+                flight = delta.length() / 235.0
+                predicted = target.position + target.velocity * flight
+                delta = predicted - muzzle
+                flat = Vec3(delta.x, delta.y, 0)
+                horizontal = flat.length()
+                pitch = ballistic_pitch(horizontal, delta.z, 235.0)
+                if pitch is None:
+                    return
+                if horizontal > 1e-6:
+                    flat.normalize()
+                direction = flat * math.cos(pitch) + Vec3(0, 0, math.sin(pitch))
+                direction.normalize()
+                self.effects.muzzle_flash(muzzle, scale=0.9)
+                self.effects.shell(unit, muzzle, direction, 235.0, 58.0)
+                return
+            self.effects.launch_missile(unit, target, NAVAL_STRIKE)
+            self.stats.missile(unit.kind, unit.team, "misil naval")
+            return
+
+        if unit.kind == "submarine":
+            # Torpedoes only. Anything ashore is the strategic salvo's problem.
+            if target.kind in NAVAL:
+                self.effects.launch_missile(unit, target, TORPEDO)
+                self.stats.missile(unit.kind, unit.team, "torpedo")
+            return
+
         if unit.kind in ("jet", "sam"):
             # Guided rounds: the Missile object flies itself with proportional
             # navigation, so nothing here has to solve an intercept.
-            spec = SURFACE_TO_AIR if unit.kind == "sam" else AIR_TO_GROUND
+            spec = (
+                SURFACE_TO_AIR if unit.kind == "sam"
+                else NAVAL_STRIKE if unit.kind == "destroyer"
+                else AIR_TO_GROUND
+            )
             self.effects.launch_missile(unit, target, spec)
+            self.stats.missile(
+                unit.kind, unit.team,
+                "misil tierra-aire" if unit.kind == "sam" else "misil aire-tierra",
+            )
             return
 
         if unit.kind in ("helicopter", "osprey", "rifleman"):
@@ -692,6 +922,7 @@ class Battle:
         if not target.alive:
             return
         amount *= DAMAGE_VS.get((shooter.kind, target.kind), 1.0)
+        self.stats.hit(shooter.kind, target.kind, shooter.team, amount)
 
         # Infantry bleeds; vehicles burn. A hit that does not kill still marks
         # a soldier, which is most of the visual feedback a 2 m unit can give.
@@ -701,6 +932,7 @@ class Battle:
         if target.take_damage(amount):
             target.health_bar.hide()
             self.kills[shooter.team] += 1
+            self.stats.kill(shooter.kind, target.kind, shooter.team)
             if target.kind in INFANTRY:
                 self.effects.blood(target.position + Vec3(0, 0, 0.5), scale=1.5, count=14)
             else:
@@ -729,6 +961,7 @@ class Battle:
         teams = {u.team for u in self.units if u.alive}
         if len(teams) <= 1:
             self.winner = next(iter(teams)) if teams else -1
+            self.stats.finish(self.elapsed, self.winner)
 
     def status_text(self) -> str:
         if self.winner is None:

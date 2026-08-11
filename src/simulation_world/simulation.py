@@ -18,6 +18,18 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument("--n-heli", type=int, default=3, help="Helicópteros por equipo.")
     parser.add_argument("--n-tanks", type=int, default=4, help="Tanques por equipo.")
     parser.add_argument(
+        "--n-submarines",
+        type=int,
+        default=1,
+        help="Submarinos lanzamisiles por equipo. Sumergidos: solo los ven aeronaves y otros submarinos.",
+    )
+    parser.add_argument(
+        "--n-destroyers",
+        type=int,
+        default=1,
+        help="Destructores lanzamisiles por equipo. Operan desde el agua contra aire y tierra.",
+    )
+    parser.add_argument(
         "--n-jets",
         type=int,
         default=4,
@@ -75,6 +87,12 @@ def build_argparser() -> argparse.ArgumentParser:
         type=float,
         default=240.0,
         help="Separación inicial entre los dos bandos, en metros.",
+    )
+    parser.add_argument(
+        "--stats-dir",
+        default="informes",
+        metavar="DIR",
+        help="Carpeta donde se guarda el informe .txt al terminar la batalla.",
     )
     parser.add_argument(
         "--assets",

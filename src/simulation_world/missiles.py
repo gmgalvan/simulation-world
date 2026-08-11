@@ -42,6 +42,14 @@ class MissileSpec:
     lifetime: float = 9.0
     damage: float = 100.0
     trail_rate: float = 26.0    # smoke puffs per second
+    # Depth below the water line at which the weapon runs. Set for torpedoes;
+    # None for anything that flies. A running weapon holds this depth and
+    # steers only in the horizontal plane.
+    run_depth: float | None = None
+    # Positive only for long-range missiles. It is the extra height at the
+    # apex of a guided parabolic arc: vertical boost, mid-course loft, then a
+    # terminal dive using proportional navigation.
+    loft_altitude: float = 0.0
 
 
 AIR_TO_GROUND = MissileSpec(
@@ -50,6 +58,20 @@ AIR_TO_GROUND = MissileSpec(
     max_lateral_g=8.0,
     proximity=5.5,
     damage=105.0,
+)
+
+TORPEDO = MissileSpec(
+    launch_speed=14.0,
+    burn_speed=32.0,        # water is not air: a torpedo is slow
+    burn_time=2.0,
+    nav_constant=3.2,
+    max_lateral_g=2.5,      # and it turns like a bus
+    seeker_cos=0.05,
+    proximity=5.5,
+    lifetime=26.0,          # but it runs for a long way
+    damage=190.0,           # and a hit on a hull is close to decisive
+    trail_rate=11.0,
+    run_depth=1.6,
 )
 
 SURFACE_TO_AIR = MissileSpec(
@@ -68,13 +90,44 @@ SURFACE_TO_AIR = MissileSpec(
     damage=85.0,
 )
 
+# Ship-launched multipurpose missile: strategic range from the side seas, but
+# less agile than a dedicated SAM against a hard-turning fighter.
+NAVAL_STRIKE = MissileSpec(
+    launch_speed=42.0,
+    burn_speed=230.0,
+    burn_time=1.8,
+    nav_constant=3.8,
+    max_lateral_g=9.0,
+    proximity=6.5,
+    lifetime=24.0,
+    damage=135.0,
+)
+
+# Four-minute strategic salvo. Its guidance has no tactical range gate: the
+# long lifetime and lofted mid-course arc let it reach any active combat unit
+# in the streamed world, including targets hidden behind mountain ranges.
+STRATEGIC_STRIKE = MissileSpec(
+    launch_speed=58.0,
+    burn_speed=315.0,
+    burn_time=3.0,
+    nav_constant=3.2,
+    max_lateral_g=7.0,
+    seeker_cos=-0.25,
+    proximity=8.0,
+    lifetime=120.0,
+    damage=155.0,
+    trail_rate=30.0,
+    loft_altitude=220.0,
+)
+
 
 class Missile:
     """A single guided round in flight."""
 
     __slots__ = (
         "np", "spec", "shooter", "target",
-        "age", "speed", "heading", "prev_pos", "_trail_debt", "lost_lock",
+        "age", "speed", "heading", "prev_pos", "launch_position",
+        "launch_horizontal_range", "_trail_debt", "lost_lock", "run_level",
     )
 
     def __init__(
@@ -95,8 +148,12 @@ class Missile:
         if self.heading.length_squared() > 1e-9:
             self.heading.normalize()
         self.prev_pos = Point3(np.get_pos())
+        self.launch_position = Point3(np.get_pos())
+        initial = Vec3(target.position) - self.launch_position
+        self.launch_horizontal_range = max(1.0, math.hypot(initial.x, initial.y))
         self._trail_debt = 0.0
         self.lost_lock = False
+        self.run_level = None   # set by the launcher for underwater weapons
 
     # ------------------------------------------------------------------
     @property
@@ -128,6 +185,8 @@ class Missile:
         # rigid body in the world gets its contacts resolved by the solver and
         # visibly bounces off whatever it was supposed to destroy.
         self.np.set_pos(self.np.get_pos() + self.heading * (self.speed * dt))
+        if self.spec.run_depth is not None:
+            self._hold_depth()
         self._point_along_velocity()
 
     def _accelerate(self, dt: float) -> None:
@@ -144,7 +203,57 @@ class Missile:
     def _guide(self, dt: float) -> None:
         """Proportional navigation: null the line-of-sight rotation rate."""
         missile_v = self.velocity
-        los = Vec3(self.target.position) - self.position
+        target_position = Vec3(self.target.position)
+        horizontal_delta = Vec3(
+            target_position.x - self.position.x,
+            target_position.y - self.position.y,
+            0.0,
+        )
+        horizontal = horizontal_delta.length()
+
+        if self.spec.loft_altitude > 0.0 and horizontal > 260.0:
+            # Boost straight out of the VLS before pitching over. Afterwards
+            # chase a point a short distance ahead on a parabola rather than
+            # aiming directly at the final target through the mountain.
+            if self.age < 1.35:
+                bearing = Vec3(0, 0, 1)
+            else:
+                direction = Vec3(horizontal_delta)
+                if direction.length_squared() > 1e-9:
+                    direction.normalize()
+                lookahead = min(280.0, horizontal)
+                progress = max(
+                    0.0,
+                    min(1.0, 1.0 - horizontal / self.launch_horizontal_range),
+                )
+                ahead_progress = min(
+                    1.0,
+                    progress + lookahead / self.launch_horizontal_range,
+                )
+                baseline_z = (
+                    self.launch_position.z
+                    + (target_position.z - self.launch_position.z) * ahead_progress
+                )
+                arc_z = (
+                    4.0
+                    * self.spec.loft_altitude
+                    * ahead_progress
+                    * (1.0 - ahead_progress)
+                )
+                waypoint = Vec3(
+                    self.position.x + direction.x * lookahead,
+                    self.position.y + direction.y * lookahead,
+                    baseline_z + arc_z,
+                )
+                bearing = waypoint - self.position
+                if bearing.length_squared() > 1e-9:
+                    bearing.normalize()
+            self._pursue(dt, bearing)
+            return
+
+        # Terminal phase: switch from the planned arc to a real homing law so
+        # moving vehicles can still be intercepted during the final dive.
+        los = target_position - self.position
         range_sq = los.length_squared()
         if range_sq < 1e-6 or missile_v.length_squared() < 1e-6:
             return
@@ -156,7 +265,7 @@ class Missile:
 
         # Seeker gimbal limit: once the target slides outside the cone the
         # missile is blind and simply carries on.
-        if bearing.dot(heading) < self.spec.seeker_cos:
+        if self.spec.loft_altitude <= 0.0 and bearing.dot(heading) < self.spec.seeker_cos:
             self.lost_lock = True
             return
 
@@ -195,6 +304,19 @@ class Missile:
             return
         steered.normalize()
         self.heading = steered
+
+    def _hold_depth(self) -> None:
+        """Keep a torpedo on its running depth and steering only in plan.
+
+        Without this it chases the vertical part of the bearing and either
+        broaches or dives into the seabed instead of running true.
+        """
+        if self.run_level is None:
+            return
+        self.np.set_z(self.run_level)
+        self.heading.set_z(0.0)
+        if self.heading.length_squared() > 1e-9:
+            self.heading.normalize()
 
     def _point_along_velocity(self) -> None:
         if self.heading.length_squared() > 1e-6:

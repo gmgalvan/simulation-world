@@ -36,6 +36,8 @@ KIND_LABELS = {
     "helicopter": "helicoptero Mi-24",
     "osprey": "convertiplano V-22",
     "tank": "tanque Leopard 2",
+    "destroyer": "destructor lanzamisiles",
+    "submarine": "submarino lanzamisiles",
     "sam": "bateria antiaerea",
     "rocket": "equipo de RPG",
     "rifleman": "fusilero",
@@ -49,6 +51,8 @@ ROSTER = (
     ("helicopter", "heli"),
     ("osprey", "V22"),
     ("tank", "tanque"),
+    ("destroyer", "destructor"),
+    ("submarine", "submarino"),
     ("sam", "AA"),
     ("rocket", "RPG"),
     ("rifleman", "fusil"),
@@ -68,6 +72,7 @@ class SimulationApp(ShowBase):
         self.sim_time = 0.0
         self._physics_debt = 0.0
         self.focus_smooth: Point3 | None = None
+        self._report_written = False
         self.keys: set[str] = set()
         self.mouse_look = False
         self._last_pointer: tuple[float, float] | None = None
@@ -218,6 +223,17 @@ class SimulationApp(ShowBase):
         team = TEAM_NAMES[unit.team]
         if not unit.alive:
             return f"{kind} ({team}) — destruido"
+        if unit.kind == "destroyer":
+            remaining = max(0, math.ceil(unit.strategic_cooldown))
+            strategic = (
+                "LISTO"
+                if remaining == 0
+                else f"{remaining // 60}:{remaining % 60:02d}"
+            )
+            return (
+                f"{kind} ({team}) — vida {unit.hp_frac * 100:.0f}% — "
+                f"salva estratégica {strategic}"
+            )
         return f"{kind} ({team}) — vida {unit.hp_frac * 100:.0f}%"
 
     def _refresh_help(self) -> None:
@@ -282,6 +298,8 @@ class SimulationApp(ShowBase):
             self.assets,
             n_heli=self.args.n_heli,
             n_tanks=self.args.n_tanks,
+            n_destroyers=self.args.n_destroyers,
+            n_submarines=self.args.n_submarines,
             n_osprey=self.args.n_osprey,
             n_jets=self.args.n_jets,
             n_sam=self.args.n_sam,
@@ -485,6 +503,7 @@ class SimulationApp(ShowBase):
         self.chunks.update(self._stream_anchors())
         self._follow_world()
 
+        self._write_report_once()
         suffix = "   ·   PAUSA" if self.paused else ""
         if self.camera_mode == "inspect" and self.inspect_unit is not None:
             self.status_text.setText(self._inspect_label() + suffix)
@@ -493,11 +512,42 @@ class SimulationApp(ShowBase):
         self._update_roster()
         return task.cont
 
+    def _write_report_once(self) -> None:
+        """Dump the battle report the moment the battle is decided."""
+        if self._report_written or self.battle is None or self.battle.winner is None:
+            return
+        self._report_written = True
+        try:
+            path = self.battle.stats.write(self.args.stats_dir)
+            print(f"[informe] estadisticas guardadas en {path}")
+        except OSError as exc:
+            print(f"[informe] no se pudo escribir el informe: {exc}")
+
+    def _submarine_status(self) -> str:
+        """Countdown to the next cruise-missile salvo, per team."""
+        parts = []
+        for team in (0, 1):
+            boats = [
+                u for u in self.battle.units
+                if u.alive and u.team == team and u.kind == "submarine"
+            ]
+            if not boats:
+                continue
+            soonest = min(boats, key=lambda b: b.strategic_cooldown)
+            if soonest.pending_salvo:
+                state = "EMERGIENDO"
+            else:
+                state = f"{max(0.0, soonest.strategic_cooldown):.0f}s"
+            parts.append(f"{TEAM_NAMES[team]} {state}")
+        return "   crucero: " + "  |  ".join(parts) if parts else ""
+
     def _update_roster(self) -> None:
         for team, text in self.roster_text.items():
             counts = self.battle.roster(team)
             parts = [f"{label} {counts.get(kind, 0)}" for kind, label in ROSTER]
             text.setText(f"{TEAM_NAMES[team]:5} " + "   ".join(parts))
+        if self.status_text is not None and self.camera_mode != "inspect":
+            self.status_text.setText(self.status_text.getText() + self._submarine_status())
 
     def _follow_world(self) -> None:
         """Keep the camera-relative scenery (water, shadow frustum) with us."""

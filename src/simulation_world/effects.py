@@ -17,7 +17,7 @@ from panda3d.core import (
 )
 
 from .assets import make_box
-from .missiles import Missile, MissileSpec, intercept_direction
+from .missiles import TORPEDO, Missile, MissileSpec, intercept_direction
 
 
 class _Timed:
@@ -205,6 +205,21 @@ class Effects:
 
         self.splatters.append(Splatter(root, random.uniform(0.9, 1.4), pieces))
 
+    def wake(self, position: Point3, scale: float = 1.0) -> None:
+        """Foam on the surface above a running torpedo."""
+        np = make_box((scale * 1.1, scale * 1.1, 0.12), (0.86, 0.90, 0.94, 0.5))
+        np.reparent_to(self.root)
+        np.set_pos(
+            position.x + random.uniform(-0.5, 0.5),
+            position.y + random.uniform(-0.5, 0.5),
+            self.terrain.water_level + 0.06,
+        )
+        np.set_h(random.uniform(0, 360))
+        np.set_transparency(TransparencyAttrib.M_alpha)
+        np.set_light_off()
+        np.set_depth_write(False)
+        self.smoke.append(_Timed(np, 2.2))
+
     def smoke_puff(self, position: Point3, scale: float = 1.0) -> None:
         shade = random.uniform(0.30, 0.46)
         np = make_box((scale, scale, scale), (shade, shade, shade * 1.04, 0.34))
@@ -239,10 +254,16 @@ class Effects:
         self.shells.append(Shell(np, direction * speed, shooter, damage, trail=trail))
         self.muzzle_flash(start, scale=0.9 if trail else 1.4)
 
-    def launch_missile(self, shooter, target, spec: MissileSpec) -> None:
+    def launch_missile(
+        self, shooter, target, spec: MissileSpec, rack_offset: float = 0.0
+    ) -> None:
         """Fire a guided round from `shooter` at `target`."""
-        start = shooter.muzzle()
-        direction = intercept_direction(start, target, spec.burn_speed)
+        start = shooter.muzzle() + shooter.np.get_quat().get_right() * rack_offset
+        direction = (
+            Vec3(0, 0, 1)
+            if spec.loft_altitude > 0.0
+            else intercept_direction(start, target, spec.burn_speed)
+        )
 
         np = self.root.attach_new_node("missile")
         np.set_pos(start)
@@ -255,7 +276,13 @@ class Effects:
         flame.set_light_off()
         flame.reparent_to(np)
 
-        self.missiles.append(Missile(np, spec, shooter, target, direction))
+        missile = Missile(np, spec, shooter, target, direction)
+        if spec.run_depth is not None:
+            # Underwater weapon: put it on its running depth immediately.
+            missile.run_level = self.terrain.water_level - spec.run_depth
+            np.set_z(missile.run_level)
+            missile.prev_pos = Point3(np.get_pos())
+        self.missiles.append(missile)
         self.muzzle_flash(start, scale=1.1)
 
     # ------------------------------------------------------------------
@@ -273,7 +300,10 @@ class Effects:
             current = missile.position
 
             for _ in range(missile.trail_puffs(dt)):
-                self.smoke_puff(current, scale=0.55)
+                if missile.run_level is not None:
+                    self.wake(current)
+                else:
+                    self.smoke_puff(current, scale=0.55)
 
             detonate = False
             victim = None

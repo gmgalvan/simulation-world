@@ -45,6 +45,14 @@
     }
   },
 
+  "destroyer": {
+    "length": 28.0,
+    "hpr": [0, 0, 0],
+    "center": true,
+    "tint": true,
+    "nodes": { "turret": "Turret" }
+  },
+
   "rifleman": {
     "length": 2.4,
     "hpr": [0, 0, 0],

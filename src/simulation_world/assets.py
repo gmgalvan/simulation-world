@@ -537,6 +537,195 @@ def build_placeholder_tank(color) -> NodePath:
     return root
 
 
+def build_placeholder_submarine(color) -> NodePath:
+    """A cruise-missile boat, bow along +Y.
+
+    Almost all of it runs below the surface, so the shapes that matter are the
+    ones that break the water: the sail with its masts and the upper curve of
+    the pressure hull.
+    """
+    root = NodePath("submarine_placeholder")
+    hull = (0.19, 0.21, 0.23, 1.0)
+    dark = (0.09, 0.10, 0.12, 1.0)
+    deck = (0.26, 0.28, 0.30, 1.0)
+
+    # Teardrop pressure hull.
+    make_loft(
+        [
+            _round_ring(12.6, 0.20, 0.20, -0.55),
+            _round_ring(11.2, 0.95, 0.95, -0.55),
+            _round_ring(7.0, 1.72, 1.72, -0.55),
+            _round_ring(0.0, 1.90, 1.90, -0.55),
+            _round_ring(-7.5, 1.74, 1.74, -0.55),
+            _round_ring(-11.4, 1.05, 1.05, -0.55),
+            _round_ring(-13.2, 0.34, 0.34, -0.55),
+        ],
+        hull,
+    ).reparent_to(root)
+
+    # Sail, its planes, and the masts that show above the waterline.
+    make_loft(
+        [
+            _hull_ring(3.30, 0.62, 0.70, 2.35, -0.30),
+            _hull_ring(1.60, 0.72, 0.82, 2.55, -0.30),
+            _hull_ring(-0.90, 0.70, 0.80, 2.45, -0.30),
+            _hull_ring(-2.10, 0.52, 0.62, 2.10, -0.30),
+        ],
+        deck,
+    ).reparent_to(root)
+    for side in (-1, 1):
+        make_box((1.9, 0.9, 0.16), deck, (side * 1.35, 0.6, 1.75)).reparent_to(root)
+    make_box((0.14, 0.14, 1.5), dark, (0.22, 0.4, 3.15)).reparent_to(root)
+    make_box((0.12, 0.12, 1.1), dark, (-0.24, -0.5, 2.95)).reparent_to(root)
+    make_box((0.5, 0.5, 0.18), _shade(color, 1.1), (0, -1.6, 2.55)).reparent_to(root)
+
+    # Vertical launch hatches forward of the sail, and the stern planes.
+    for i in range(3):
+        for side in (-1, 1):
+            make_box((0.70, 0.70, 0.14), dark, (side * 0.85, 6.4 - i * 1.25, 0.98)).reparent_to(root)
+    for side in (-1, 1):
+        make_box((2.6, 1.5, 0.16), deck, (side * 1.9, -11.2, -0.55)).reparent_to(root)
+    make_box((0.18, 1.6, 2.6), deck, (0, -11.2, 0.35)).reparent_to(root)
+    make_loft(
+        [_round_ring(-13.0, 0.55, 0.55, -0.55), _round_ring(-14.1, 0.30, 0.30, -0.55)],
+        dark,
+    ).reparent_to(root)
+
+    return root
+
+
+def build_placeholder_destroyer(color) -> NodePath:
+    """A modern guided-missile destroyer, bow pointing along +Y.
+
+    The silhouette prioritises the features that distinguish a destroyer at
+    battle-camera distance: a long chined hull, raised bridge, radar mast,
+    gun turret and two banks of vertical-launch cells.
+    """
+    root = NodePath("destroyer_placeholder")
+    # Naval grey stays distinct from both the blue sea and the red/blue team
+    # colours. Small identification panels carry the team colour instead.
+    hull = (0.34, 0.37, 0.39, 1.0)
+    deck = (0.48, 0.51, 0.52, 1.0)
+    superstructure = (0.58, 0.61, 0.62, 1.0)
+    dark = (0.10, 0.13, 0.16, 1.0)
+    radar = (0.32, 0.42, 0.48, 1.0)
+
+    # Hull with a raked, flared bow: the sheer rises towards the stem and the
+    # beam pinches in at the forefoot, which is what makes a warship read as
+    # one from the side rather than as a barge.
+    make_loft(
+        [
+            _hull_ring(14.4, 0.16, 0.12, 1.05, -0.72),
+            _hull_ring(12.6, 1.05, 0.62, 0.92, -1.02),
+            _hull_ring(10.2, 2.20, 1.72, 0.74, -1.20),
+            _hull_ring(6.4, 3.00, 2.72, 0.56, -1.22),
+            _hull_ring(1.0, 3.28, 3.22, 0.46, -1.20),
+            _hull_ring(-6.0, 3.30, 3.24, 0.44, -1.18),
+            _hull_ring(-11.0, 3.02, 2.86, 0.40, -1.12),
+            _hull_ring(-13.9, 2.55, 2.30, 0.34, -1.00),
+        ],
+        hull,
+    ).reparent_to(root)
+    # Main deck, and the knuckle strake running the length of the hull.
+    make_box((5.9, 21.5, 0.20), deck, (0, -0.6, 0.50)).reparent_to(root)
+    for side in (-1, 1):
+        make_box((0.16, 19.0, 0.30), _shade(hull, 0.82), (side * 3.24, -1.0, 0.02)).reparent_to(root)
+    # Breakwater and forecastle bulwark.
+    make_box((4.4, 0.18, 0.42), deck, (0, 9.3, 0.72)).reparent_to(root)
+
+    # Forward gun in an independently turning mount.
+    turret = NodePath("Turret")
+    turret.set_pos(0, 7.6, 0.75)
+    turret.reparent_to(root)
+    make_box((2.5, 2.8, 0.85), superstructure, (0, 0, 0.35)).reparent_to(turret)
+    make_loft(
+        [_tube_ring(1.1, 0.25, z=0.42), _tube_ring(3.3, 0.17, z=0.42)],
+        dark,
+    ).reparent_to(turret)
+
+    # Vertical launch cells, visibly arranged in the forward and aft banks of
+    # an Arleigh Burke rather than as generic tubes stuck on the deck.
+    for y, rows in ((4.0, 3), (-5.2, 4)):
+        for row in range(rows):
+            for x in (-1.05, 1.05):
+                make_box((0.78, 0.86, 0.32), dark, (x, y - row * 0.92, 0.82)).reparent_to(root)
+
+    # Superstructure in tapering steps, the way a real deckhouse is built up.
+    make_loft(
+        [
+            _hull_ring(2.60, 2.05, 2.25, 2.62, 0.55),
+            _hull_ring(0.20, 2.18, 2.38, 2.72, 0.55),
+            _hull_ring(-2.60, 2.05, 2.25, 2.58, 0.55),
+        ],
+        deck,
+    ).reparent_to(root)
+    # Bridge, angled back, with a dark window band right round the front.
+    make_loft(
+        [
+            _hull_ring(2.35, 1.55, 1.80, 4.05, 2.60),
+            _hull_ring(0.90, 1.72, 1.92, 4.15, 2.60),
+            _hull_ring(-0.60, 1.60, 1.80, 4.00, 2.60),
+        ],
+        superstructure,
+    ).reparent_to(root)
+    make_box((3.30, 0.14, 0.52), dark, (0, 2.38, 3.72)).reparent_to(root)
+    for side in (-1, 1):
+        make_box((0.14, 2.6, 0.52), dark, (side * 1.72, 1.15, 3.72)).reparent_to(root)
+    # Boat deck, funnel house and the twin uptakes.
+    make_loft(
+        [
+            _hull_ring(-3.30, 1.80, 2.00, 2.95, 0.55),
+            _hull_ring(-6.40, 1.70, 1.90, 2.80, 0.55),
+        ],
+        deck,
+    ).reparent_to(root)
+    for side in (-1, 1):
+        funnel = make_loft(
+            [
+                _hull_ring(-4.10, 0.52, 0.60, 4.30, 2.90),
+                _hull_ring(-5.30, 0.46, 0.54, 4.10, 2.90),
+            ],
+            superstructure,
+        )
+        funnel.set_x(side * 1.05)
+        funnel.reparent_to(root)
+        make_box((0.62, 0.72, 0.16), dark, (side * 1.05, -4.6, 4.36)).reparent_to(root)
+
+    # Lattice mast: a tapering tower with yards, a planar array on the face
+    # and the big rotating air-search antenna on top.
+    make_loft(
+        [
+            _hull_ring(-1.30, 0.42, 0.46, 4.10, 4.05),
+            _hull_ring(-1.30, 0.30, 0.34, 7.10, 7.05),
+        ],
+        dark,
+    ).reparent_to(root)
+    for z, span in ((5.05, 3.9), (6.05, 3.1)):
+        make_box((span, 0.12, 0.14), dark, (0, -1.30, z)).reparent_to(root)
+        for side in (-1, 1):
+            make_box((0.10, 0.10, 0.9), dark, (side * span * 0.45, -1.30, z + 0.45)).reparent_to(root)
+    make_box((2.30, 0.16, 1.15), radar, (0, -0.95, 5.55)).reparent_to(root)
+    rotator = make_box((3.60, 0.20, 0.55), radar, (0, 0, 0))
+    rotator.set_pos(0, -1.30, 7.45)
+    rotator.set_h(24.0)
+    rotator.reparent_to(root)
+    make_box((0.12, 0.12, 1.5), dark, (0, -1.30, 8.35)).reparent_to(root)
+
+    # Close-in weapon station and rear helicopter deck with an H marking.
+    for x in (1.85, -1.85):
+        make_box((0.62, 0.62, 0.44), dark, (x, 0.5, 2.05)).reparent_to(root)
+        make_box((0.14, 0.95, 0.14), radar, (x, 0.88, 2.35)).reparent_to(root)
+    make_box((5.05, 5.4, 0.16), (0.28, 0.30, 0.31, 1.0), (0, -10.0, 0.78)).reparent_to(root)
+    flight_mark = (0.88, 0.88, 0.82, 1.0)
+    make_box((0.18, 1.7, 0.035), flight_mark, (0, -10.0, 0.89)).reparent_to(root)
+    make_box((1.15, 0.18, 0.035), flight_mark, (0, -9.5, 0.89)).reparent_to(root)
+    make_box((1.15, 0.18, 0.035), flight_mark, (0, -10.5, 0.89)).reparent_to(root)
+    # Team recognition panels remain readable without tinting the whole hull.
+    make_box((0.18, 2.8, 0.55), color, (3.28, 1.2, 0.10)).reparent_to(root)
+    make_box((0.18, 2.8, 0.55), color, (-3.28, 1.2, 0.10)).reparent_to(root)
+    return root
+
+
 def _pod_ring(z: float, half_x: float, half_y: float, cy: float = 0.0, sides: int = 8):
     """Elliptical section in the XY plane at height `z`.
 
@@ -1111,6 +1300,8 @@ class AssetLibrary:
             "osprey": build_placeholder_osprey,
             "jet": build_placeholder_jet,
             "sam": build_placeholder_sam,
+            "destroyer": build_placeholder_destroyer,
+            "submarine": build_placeholder_submarine,
         }.get(kind, build_placeholder_tank)
         return builder(color)
 

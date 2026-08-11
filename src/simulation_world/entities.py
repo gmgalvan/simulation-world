@@ -159,6 +159,39 @@ SAM = UnitSpec(
     fire_halt=1.2,
 )
 
+# Guided-missile destroyer. It is deliberately a stand-off unit: its launch
+# cells can engage aircraft and land targets long before a naval gun could.
+DESTROYER = UnitSpec(
+    mass=8_500.0,
+    half_extents=Vec3(3.4, 11.5, 2.3),
+    max_health=360.0,
+    cruise_speed=12.0,
+    turn_rate=0.48,
+    attack_range=1_200.0,
+    damage=135.0,
+    fire_period=4.2,
+    model_length=28.0,
+    stand_off=0.55,
+    drive_gain=3.2,
+)
+
+# Cruise-missile submarine. Almost harmless up close: its whole reason to
+# exist is the strategic salvo, which used to live on the destroyer where a
+# weapon of unlimited reach made much less sense.
+SUBMARINE = UnitSpec(
+    mass=7_200.0,
+    half_extents=Vec3(2.6, 13.0, 2.0),
+    max_health=240.0,
+    cruise_speed=7.0,
+    turn_rate=0.35,
+    attack_range=520.0,
+    damage=70.0,
+    fire_period=9.0,
+    model_length=26.0,
+    stand_off=0.6,
+    drive_gain=3.0,
+)
+
 SPECS = {
     "helicopter": HELICOPTER,
     "tank": TANK,
@@ -167,11 +200,25 @@ SPECS = {
     "rocket": ROCKET,
     "jet": JET,
     "sam": SAM,
+    "destroyer": DESTROYER,
+    "submarine": SUBMARINE,
 }
 
 # Kinds that walk or drive rather than fly.
 GROUND = frozenset({"tank", "rifleman", "rocket", "sam"})
 INFANTRY = frozenset({"rifleman", "rocket"})
+NAVAL = frozenset({"destroyer", "submarine"})
+# How deep a boat runs when it is not shooting, and how long it stays up.
+SUBMERGED_DEPTH = 2.6
+SURFACING_SECONDS = 7.0
+# A submerged boat is invisible to anything without sonar or a look from above:
+# only aircraft and other submarines get to engage it at all.
+SUBSURFACE = frozenset({"submarine"})
+# A destroyer belongs here: hunting submarines is what the type is for, and
+# leaving it out made the boats invulnerable to the one ship built to kill them.
+DETECTS_SUBSURFACE = frozenset(
+    {"jet", "helicopter", "osprey", "submarine", "destroyer"}
+)
 
 # How much faster the tiltrotor is with the nacelles rotated fully forward.
 OSPREY_FORWARD_BOOST = 1.35
@@ -203,6 +250,11 @@ class Unit:
         self.health = spec.max_health
         self.alive = True
         self.cooldown = 0.0
+        # Strategic naval strike is independent of the normal weapon cooldown.
+        # Only the submarine carries the strategic battery.
+        self.strategic_cooldown = 30.0 if kind in SUBSURFACE else 0.0
+        self.surface_time = 0.0    # seconds left running on the surface
+        self.pending_salvo = False  # ordered up to shoot, not yet shallow enough
         self.cruise_alt = cruise_alt
         self.orbit_dir = 1.0
         self.tilt = 0.0  # tiltrotor nacelles: 0 = hover, 1 = airplane mode
@@ -217,6 +269,15 @@ class Unit:
         # visible in the gait instead of feet skating at a fixed rate.
         self.gait_phase = (self.id * 2.39996) % math.tau
         self.gait_blend = 0.0
+        bounds = model.get_tight_bounds()
+        # Root height that leaves roughly 42 cm of the lowest hull immersed.
+        # Computing it from the model also keeps optional external destroyer
+        # assets on their waterline instead of assuming placeholder geometry.
+        self.waterline_offset = (
+            -0.42 - float(bounds[0].z)
+            if kind in NAVAL and bounds is not None
+            else 0.0
+        )
 
         node = BulletRigidBodyNode(f"{kind}-{self.id}")
         node.add_shape(BulletBoxShape(spec.half_extents))
@@ -276,8 +337,17 @@ class Unit:
             "rocket": (1.88, 0.72),
             "jet": (6.5, -0.8),   # off the rails, below the wing
             "sam": (1.6, 2.4),    # off the launcher rack on top
+            "destroyer": (8.8, 3.6),  # forward VLS bank above the deck
         }.get(self.kind, (4.2, 1.1))
         return self.position + self.forward * offset + Vec3(0, 0, height)
+
+    def naval_gun_muzzle(self) -> Point3:
+        """Muzzle of the 127 mm bow gun on the destroyer placeholder."""
+        return self.position + self.forward * 10.8 + Vec3(0, 0, 1.5)
+
+    def naval_ciws_muzzle(self) -> Point3:
+        """Forward close-in weapon station, beside the bridge."""
+        return self.position + self.forward * 4.8 + Vec3(1.8, 0, 2.3)
 
     def can_bear(self, target: Unit) -> bool:
         """Fixed-wing aircraft only shoot at what is lined up ahead of them.
@@ -298,6 +368,10 @@ class Unit:
         flat.normalize()
         nose.normalize()
         return flat.dot(nose) > 0.86  # ~30 degree cone in plan
+
+    def is_surfaced(self, water_level: float) -> bool:
+        """Shallow enough for the launch tubes to clear the water."""
+        return self.position.z >= water_level + self.waterline_offset - 0.45
 
     def take_damage(self, amount: float) -> bool:
         """Apply damage; returns True if this hit destroyed the unit."""
@@ -415,6 +489,76 @@ class Unit:
 
         speed = self.spec.cruise_speed * (1.0 + OSPREY_FORWARD_BOOST * self.tilt)
         self._fly(dt, terrain, target, engaged, speed, 0.7)
+
+    def update_naval(self, dt: float, terrain, target: Unit | None, engaged: bool = True) -> None:
+        """Keep a hull exactly on its waterline and manoeuvring at sea.
+
+        Shared by the destroyer and the submarine: both must never use the
+        ground controller, which drives straight at a target that is always
+        inland and beaches them within seconds.
+        """
+        water = terrain.water_level
+        # The procedural hull's root-to-keel distance is 1.2 m. Holding its
+        # root 0.78 m above sea level immerses only the lower 0.42 m of hull.
+        # This hard waterline avoids accumulated Bullet gravity and oscillation
+        # making a ship appear to dive between frames.
+        surfaced = water + self.waterline_offset
+        position = self.position
+        if self.kind in SUBSURFACE:
+            # Runs submerged and only comes up to launch, so the surfacing is
+            # a visible event rather than a boat that is always on top.
+            self.surface_time = max(0.0, self.surface_time - dt)
+            goal = surfaced if self.surface_time > 0.0 else water - SUBMERGED_DEPTH
+            target_z = position.z + (goal - position.z) * min(1.0, 1.7 * dt)
+        else:
+            target_z = surfaced
+        if abs(position.z - target_z) > 0.005:
+            self.np.set_z(target_z)
+        velocity = self.velocity
+        self.node.set_linear_velocity(Vec3(velocity.x, velocity.y, 0.0))
+        self.node.apply_central_force(Vec3(0, 0, self.spec.mass * GRAVITY))
+
+        if target is None:
+            self._drive_horizontal(Vec3(0, 0, 0), gain=self.spec.drive_gain)
+            return
+
+        to_target = target.position - self.position
+        flat = Vec3(to_target.x, to_target.y, 0)
+        distance = flat.length()
+        if distance > 1e-6:
+            flat.normalize()
+            self._steer_yaw(math.atan2(flat.y, flat.x) - math.pi / 2, dt)
+
+        # Keep sea room. Their targets are all ashore, so steering at one just
+        # presses the hull against the beach until it looks stranded; nudge
+        # back out whenever the water under the keel gets thin.
+        depth = water - terrain.height_at(position.x, position.y)
+        if depth < 4.5:
+            seaward = 1.0 if position.x >= 0.0 else -1.0
+            offshore = Vec3(seaward * (4.5 - depth) * 0.9, 0.0, 0.0)
+            self._drive_horizontal(
+                offshore * self.spec.cruise_speed, gain=self.spec.drive_gain
+            )
+
+        # Ships remain in deep water. If the next sea mile is land or shallow
+        # water, turn along the coast; their missiles still cover the shore.
+        probe = self.position + flat * 22.0
+        clear_ahead = terrain.height_at(probe.x, probe.y) < water - 0.8
+        stand_off = self.spec.attack_range * (self.spec.stand_off if engaged else 0.45)
+        if clear_ahead and distance > stand_off:
+            self._drive_horizontal(flat * self.spec.cruise_speed, gain=self.spec.drive_gain)
+        else:
+            patrol = Vec3(-flat.y, flat.x, 0) * self.orbit_dir
+            patrol_probe = self.position + patrol * 22.0
+            if terrain.height_at(patrol_probe.x, patrol_probe.y) >= water - 0.8:
+                patrol = -patrol
+                patrol_probe = self.position + patrol * 22.0
+            if terrain.height_at(patrol_probe.x, patrol_probe.y) < water - 0.8:
+                self._drive_horizontal(
+                    patrol * self.spec.cruise_speed * 0.55, gain=self.spec.drive_gain
+                )
+            else:
+                self._drive_horizontal(Vec3(0, 0, 0), gain=self.spec.drive_gain)
 
     def _probe_costs(self, directions, terrain, probe: float):
         """Cost of driving each way, in a single vectorised terrain query.

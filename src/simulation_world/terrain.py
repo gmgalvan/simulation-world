@@ -131,6 +131,11 @@ class InfiniteTerrain:
         # fighting happens there, and a river cutting across the middle of it
         # just drowns the ground units — they have to cross somewhere.
         self.clear_radius = clear_radius
+        # Two permanent sea lanes flank the dry battlefield. They give naval
+        # units an actual ocean to operate in instead of spawning them in a
+        # random lake, while keeping the central land battle traversable.
+        self.sea_start = max(300.0, clear_radius * 0.86)
+        self.sea_end = max(420.0, clear_radius * 1.10)
 
     # ------------------------------------------------------------------
     # Height field
@@ -175,6 +180,11 @@ class InfiniteTerrain:
             carve = carve * _smoothstep(
                 self.clear_radius * 0.62, self.clear_radius, distance
             )
+        # Open water at the left and right of the battlefield (world X axis).
+        # Unlike procedural lakes this is continuous along Y, so a destroyer
+        # can sail and patrol without ever having to cross land.
+        side_sea = _smoothstep(self.sea_start, self.sea_end, np.abs(x))
+        carve = np.maximum(carve, side_sea)
         # Pull the ground down towards a bed that sits below the water line, so
         # the water plane shows through instead of floating over dry land.
         bed = self.water_level - 6.0
