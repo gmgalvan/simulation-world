@@ -4,9 +4,20 @@ Batalla 3D autónoma en un **mundo abierto infinito**, con **física de cuerpo
 rígido real (Bullet)** y render en **Panda3D**.
 
 Dos equipos (rojo y azul) se despliegan enfrentados, se buscan solos y combaten
-hasta que uno queda en pie. Siete tipos de unidad: **fusileros** (AK-47),
-**equipos de RPG**, tanque, **batería antiaérea**, helicóptero de ataque,
-**convertiplano tipo V-22** (tiltrotor) y **caza furtivo tipo F-35**.
+hasta que uno queda en pie. **Nueve tipos de unidad**, con papeles que se
+contrarrestan entre sí:
+
+| | Unidad | Papel |
+|---|---|---|
+| 🚶 | Fusilero (AK-47) | Numeroso y barato. Inútil contra blindaje |
+| 🎯 | Equipo de RPG | Anticarro. Hacen falta ~3 por tanque enemigo |
+| 🛡️ | Tanque Leopard 2 | Para a disparar; un obús mata a un soldado de un tiro |
+| 📡 | Batería antiaérea | La respuesta desde tierra al poder aéreo |
+| 🚁 | Helicóptero Mi-24 | Anticarro volador |
+| 🛩️ | Convertiplano V-22 | Rápido y duro, poco armado |
+| ✈️ | Caza F-35 | Vuela alto y ataca con misiles guiados |
+| 🚢 | Destructor | Misiles de 1200 m aire/tierra, y sonar antisubmarino |
+| 🌊 | Submarino | Sumergido, torpedos y salva de crucero de alcance ilimitado |
 
 ## Qué hace
 
@@ -283,12 +294,12 @@ uv run main.py --help
 | `--seed N` | `0` | Semilla del mundo y del despliegue |
 | `--n-heli N` | `3` | Helicópteros por equipo |
 | `--n-tanks N` | `4` | Tanques por equipo |
-| `--n-destroyers N` | `1` | Destructores lanzamisiles por equipo; navegan solo por los dos mares laterales y atacan aire/tierra a gran alcance |
+| `--n-destroyers N` | `1` | Destructores por equipo. Misiles de 1200 m contra aire y tierra, y sonar para cazar submarinos |
 
 Los destructores seleccionan su arma automáticamente: misil guiado para blancos a más de 310 m, cañón naval de 127 mm a distancia media y CIWS/ametralladoras contra amenazas cercanas (menos de 82 m).
 Además, cada destructor prepara durante 4 minutos una salva estratégica de hasta 3 misiles. Al quedar lista, ataca unidades terrestres enemigas en cualquier punto activo del mundo, sin límite táctico de alcance ni línea de visión. La trayectoria se calcula en `missiles.py`: lanzamiento vertical, arco parabólico guiado con 220 m de altura adicional nominal y picado terminal con navegación proporcional. En modo inspección se muestra la cuenta regresiva.
 | `--n-jets N` | `4` | Cazas F-35 por equipo |
-| `--n-submarines N` | `1` | Submarinos lanzamisiles por equipo |
+| `--n-submarines N` | `1` | Submarinos por equipo. Sumergidos, con torpedos y la salva de crucero |
 | `--n-sam N` | `2` | Baterías antiaéreas por equipo |
 | `--n-rifles N` | `6` | Fusileros (AK-47) por equipo |
 | `--n-rockets N` | `3` | Equipos de RPG por equipo. Hacen falta ~3 por tanque enemigo |
@@ -302,6 +313,10 @@ Además, cada destructor prepara durante 4 minutos una salva estratégica de has
 | `--deploy N` | `240` | Separación inicial entre los dos bandos |
 | `--resolution AxB` | `1600x900` | Tamaño de ventana o captura |
 | `--assets DIR` | `./assets` | Carpeta de modelos |
+| `--stats-dir DIR` | `informes` | Dónde se guarda el informe `.txt` al terminar |
+| `--shots N` | — | Modo sin ventana: guarda N capturas PNG |
+| `--shots-dir DIR` | `shots` | Carpeta de las capturas |
+| `--shot-interval N` | `1.5` | Segundos simulados entre capturas |
 
 Batalla grande y mucha distancia de visión:
 
@@ -370,11 +385,18 @@ src/simulation_world/
   chunks.py                     # streaming: carga/descarga alrededor de la accion
   scenery.py                    # bosque low-poly procedural (fundido en un Geom)
   assets.py                     # carga de modelos y placeholders procedurales
-                                #   (soldado, tanque, helicóptero, convertiplano)
+                                #   (los nueve tipos, con geometría lofteada)
   missiles.py                   # misiles guiados: navegación proporcional
   entities.py                   # Unit: cuerpo rígido + modelo de vuelo/conducción
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
   app.py                        # ventana, luces, cámara, HUD, bucle principal
+  stats.py                      # recuento e informe .txt de la batalla
   simulation.py                 # CLI
 ```
+
+## Para agentes y colaboradores
+
+Las convenciones del repositorio, las trampas ya pisadas y cómo verificar un
+cambio están en [AGENTS.md](AGENTS.md). `CLAUDE.md` apunta ahí mismo: una sola
+lista, para que no diverjan.
