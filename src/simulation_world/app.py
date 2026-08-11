@@ -81,6 +81,7 @@ class SimulationApp(ShowBase):
         self.inspect_unit = None
         self.inspect_angle = 0.0
         self.inspect_zoom = 1.0
+        self.unit_view_masked = None
 
         self.disable_mouse()
         self.set_background_color(SKY_COLOR)
@@ -257,7 +258,12 @@ class SimulationApp(ShowBase):
         elif self.camera_mode == "inspect":
             text = (
                 "INSPECCION: [TAB] siguiente unidad   [SHIFT+TAB] anterior   "
-                "ARRASTRA girar   RUEDA acercar   [I] salir"
+                "ARRASTRA girar   RUEDA acercar   [V] vista frontal   [I] salir"
+            )
+        elif self.camera_mode == "unit":
+            text = (
+                "VISTA DE UNIDAD: [TAB] siguiente   [SHIFT+TAB] anterior   "
+                "[V] volver a inspeccion   [I] salir"
             )
         else:
             text = (
@@ -289,6 +295,7 @@ class SimulationApp(ShowBase):
         self.accept("wheel_down", self._zoom, [1.0])
         # Inspector: get right up to a single unit and look it over.
         self.accept("i", self.toggle_inspect)
+        self.accept("v", self.toggle_unit_view)
         self.accept("tab", self.cycle_inspect, [1])
         self.accept("shift-tab", self.cycle_inspect, [-1])
         # Held keys rather than key repeat: repeat rates are jerky and differ
@@ -326,9 +333,16 @@ class SimulationApp(ShowBase):
 
     def restart_battle(self) -> None:
         # NB: not named `restart` — ShowBase already defines that and calls it.
+        self._restore_unit_view_parts()
         self._start_battle(self.args.seed + int(self.sim_time * 1000) + 1)
+        self.inspect_unit = None
+        if self.camera_mode in ("inspect", "unit"):
+            self.camera_mode = "orbit"
+            self.camLens.set_near(0.8)
+            self._refresh_help()
 
     def cycle_camera(self) -> None:
+        self._restore_unit_view_parts()
         if self.camera_mode in CAMERA_MODES:
             index = CAMERA_MODES.index(self.camera_mode)
             self.camera_mode = CAMERA_MODES[(index + 1) % len(CAMERA_MODES)]
@@ -337,6 +351,7 @@ class SimulationApp(ShowBase):
             # rejoins at the start rather than looking itself up and failing.
             self.camera_mode = CAMERA_MODES[0]
         self.inspect_unit = None
+        self.camLens.set_near(0.8)
         self.chase_index += 1
         if self.camera_mode != "free" and self.mouse_look:
             self.toggle_mouse_look()
@@ -352,9 +367,11 @@ class SimulationApp(ShowBase):
         return [u for u in self.battle.units if not u.np.is_empty()]
 
     def toggle_inspect(self) -> None:
-        if self.camera_mode == "inspect":
+        if self.camera_mode in ("inspect", "unit"):
+            self._restore_unit_view_parts()
             self.camera_mode = "orbit"
             self.inspect_unit = None
+            self.camLens.set_near(0.8)
         else:
             self.camera_mode = "inspect"
             self.inspect_angle = 35.0
@@ -364,13 +381,43 @@ class SimulationApp(ShowBase):
                 self.inspect_unit = units[0] if units else None
         self._refresh_help()
 
+    def toggle_unit_view(self) -> None:
+        """See straight ahead from the currently selected living unit."""
+        if self.camera_mode == "unit":
+            self._restore_unit_view_parts()
+            self.camera_mode = "inspect"
+            self.camLens.set_near(0.8)
+            self._refresh_help()
+            return
+
+        living = [unit for unit in self._inspectable() if unit.alive]
+        if self.inspect_unit not in living:
+            self.inspect_unit = living[0] if living else None
+        if self.inspect_unit is None:
+            return
+        self.camera_mode = "unit"
+        # A cockpit/head camera needs a short near plane or nearby parts of a
+        # vehicle vanish abruptly. The normal value is restored on exit.
+        self.camLens.set_near(0.16)
+        self._refresh_help()
+
+    def _restore_unit_view_parts(self) -> None:
+        """Restore pieces hidden only to keep a first-person view unobstructed."""
+        if self.unit_view_masked is not None:
+            rotor = self.unit_view_masked.main_rotor
+            if rotor is not None and not rotor.is_empty():
+                rotor.show()
+        self.unit_view_masked = None
+
     def cycle_inspect(self, step: int) -> None:
         """Step through every unit on the field, either team."""
         units = self._inspectable()
+        if self.camera_mode == "unit":
+            units = [unit for unit in units if unit.alive]
         if not units:
             self.inspect_unit = None
             return
-        if self.camera_mode != "inspect":
+        if self.camera_mode not in ("inspect", "unit"):
             self.camera_mode = "inspect"
             self.inspect_angle = 35.0
         try:
@@ -379,6 +426,58 @@ class SimulationApp(ShowBase):
             index = -1 if step > 0 else 0
         self.inspect_unit = units[(index + step) % len(units)]
         self._refresh_help()
+
+    def _update_unit_camera(self) -> None:
+        living = [unit for unit in self._inspectable() if unit.alive]
+        if self.inspect_unit not in living:
+            self.inspect_unit = living[0] if living else None
+        if self.inspect_unit is None:
+            self._restore_unit_view_parts()
+            self.camera_mode = "orbit"
+            self.camLens.set_near(0.8)
+            self._refresh_help()
+            return
+
+        unit = self.inspect_unit
+        if self.unit_view_masked is not unit:
+            self._restore_unit_view_parts()
+            # From the external nose position the full-size rotor disc can
+            # cross the lens as a black slab. Other observers still see it;
+            # it is hidden only while this helicopter owns the camera.
+            if unit.kind == "helicopter" and not unit.main_rotor.is_empty():
+                unit.main_rotor.hide()
+                self.unit_view_masked = unit
+        forward = Vec3(unit.forward)
+        if forward.length_squared() < 1e-9:
+            forward = Vec3(0, 1, 0)
+        forward.normalize()
+        forward_offset, eye_height = {
+            "rifleman": (0.22, 0.72),
+            "rocket": (0.22, 0.72),
+            "tank": (0.75, 2.10),
+            "sam": (2.85, 2.35),
+            # Procedural aircraft use opaque canopy geometry. Put the camera
+            # just ahead of the glazing rather than inside that dark shell.
+            "jet": (5.05, 0.72),
+            "helicopter": (4.78, 0.62),
+            "osprey": (7.18, 0.42),
+            "destroyer": (1.4, 4.35),
+            "submarine": (1.2, 2.65),
+        }.get(unit.kind, (0.5, max(0.8, unit.spec.half_extents.z * 0.8)))
+        eye = Point3(unit.position + forward * forward_offset + Vec3(0, 0, eye_height))
+        view_direction = Vec3(forward)
+        if unit.kind == "sam":
+            # This is the optical/radar station, not the driver's slit: follow
+            # the tracked aircraft. With no lock, scan slightly above horizon.
+            tracked = unit.target
+            if tracked is not None and getattr(tracked, "alive", False):
+                view_direction = Vec3(tracked.position) - eye
+            else:
+                view_direction += Vec3(0, 0, 0.11)
+            if view_direction.length_squared() > 1e-9:
+                view_direction.normalize()
+        self.camera.set_pos(eye)
+        self.camera.look_at(eye + view_direction * 120.0)
 
     def _update_inspect_camera(self, dt: float) -> None:
         units = self._inspectable()
@@ -520,7 +619,7 @@ class SimulationApp(ShowBase):
 
         self._write_report_once()
         suffix = "   ·   PAUSA" if self.paused else ""
-        if self.camera_mode == "inspect" and self.inspect_unit is not None:
+        if self.camera_mode in ("inspect", "unit") and self.inspect_unit is not None:
             self.status_text.setText(self._inspect_label() + suffix)
         else:
             self.status_text.setText(self.battle.status_text() + suffix)
@@ -579,7 +678,7 @@ class SimulationApp(ShowBase):
                 f"edificios {city.buildings_alive}/{city.initial_buildings} "
                 f"(caídos {buildings_lost})"
             )
-        if self.status_text is not None and self.camera_mode != "inspect":
+        if self.status_text is not None and self.camera_mode not in ("inspect", "unit"):
             self.status_text.setText(self.status_text.getText() + self._submarine_status())
 
     def _follow_world(self) -> None:
@@ -600,6 +699,9 @@ class SimulationApp(ShowBase):
             return
         if self.camera_mode == "inspect":
             self._update_inspect_camera(dt)
+            return
+        if self.camera_mode == "unit":
+            self._update_unit_camera()
             return
 
         # focus_point() jumps whenever the closest enemy pair changes; ease

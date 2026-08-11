@@ -181,6 +181,13 @@ gira despacio a su alrededor para verla en detalle, con el encuadre ajustado al
 tamaño de cada modelo — un fusilero y un caza llenan el plano por igual. `TAB` y
 `SHIFT+TAB` recorren **todas** las unidades del campo, de cualquier bando,
 incluidos los pecios. El marcador dice qué estás mirando y con cuánta vida.
+Pulsa `V` sobre la unidad seleccionada para entrar en **vista de unidad**: la
+cámara ocupa la posición de sus ojos, cabina, torreta o puente y apunta en la
+misma dirección que su frente. En esa vista `TAB` y `SHIFT+TAB` cambian entre
+unidades vivas; `V` vuelve al inspector y `I` regresa a la cámara de batalla.
+La batería antiaérea usa la posición elevada de su estación óptica y sigue al
+blanco fijado por el radar; cuando no tiene uno, explora ligeramente por encima
+del horizonte.
 
 **Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
 zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
@@ -267,7 +274,7 @@ visual mayor que la del misil naval multipropósito.
 
 El **CIWS también protege al propio destructor de misiles entrantes**. Vigila
 los proyectiles guiados enemigos que lo tienen como blanco y abre fuego dentro
-de 135 m en ráfagas de 0.18 s. Cada ráfaga tiene entre 38% y 72% de probabilidad
+de 90 m en ráfagas de 0.25 s. Cada ráfaga tiene entre 22% y 48% de probabilidad
 de destruir el misil según la cercanía; la intercepción produce trazadoras y
 una detonación pequeña en vuelo. No puede detener torpedos bajo el agua. Las
 intercepciones quedan registradas tanto en el informe TXT como en el JSON.
@@ -337,6 +344,7 @@ uv run main.py
 |---|---|
 | `I` | **Inspeccionar una unidad de cerca** (entrar/salir) |
 | `TAB` / `SHIFT+TAB` | Unidad siguiente / anterior mientras inspeccionas |
+| `V` | Ver de frente desde la unidad seleccionada / volver al inspector |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |

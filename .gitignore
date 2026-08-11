@@ -26,6 +26,7 @@ env/
 
 # Generated screenshots and runtime output
 shots/
+informes/
 *.log
 
 # Editors and operating systems

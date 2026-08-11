@@ -52,8 +52,8 @@ STRATEGIC_SALVO_SIZE = 3
 # Ship-launched anti-air missiles need time for radar confirmation and VLS
 # sequencing. Ground/ship strike missiles retain the destroyer's base cycle.
 NAVAL_AA_FIRE_PERIOD = 8.0
-CIWS_MISSILE_RANGE = 135.0
-CIWS_DEFENSIVE_PERIOD = 0.18
+CIWS_MISSILE_RANGE = 90.0
+CIWS_DEFENSIVE_PERIOD = 0.25
 
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
 # is more attractive, missing pairs default to 1.0. Tanks must not chase
@@ -776,7 +776,7 @@ class Battle:
         unit.cooldown = max(unit.cooldown, CIWS_DEFENSIVE_PERIOD)
 
         closeness = 1.0 - distance / CIWS_MISSILE_RANGE
-        intercept_chance = 0.38 + 0.34 * closeness
+        intercept_chance = 0.22 + 0.26 * closeness
         if self.rng.random() < intercept_chance and self.effects.intercept_missile(missile):
             self.stats.intercept(
                 unit.kind,
