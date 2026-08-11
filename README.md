@@ -253,7 +253,10 @@ La tabla completa de fases, umbrales y casos límite está en
 **Guerra naval.** El mar corre a ambos lados del campo. El **destructor** lleva
 tres escalones de armamento: CIWS/ametralladoras a menos de 82 m, cañón Mk 45
 de 127 mm entre 82 y 310 m, y misiles guiados de hasta 1200 m contra aire y
-tierra. También posee sonar y puede atacar submarinos.
+tierra. Contra aeronaves, el lanzamiento naval tiene un ciclo nominal de 8 s
+(con una variación de ±10%); el cañón, el CIWS y los ataques contra blancos de
+superficie conservan sus propias cadencias. También posee sonar y puede atacar
+submarinos.
 
 El **submarino** navega sumergido —91% del tiempo en las mediciones— y lleva
 solo dos sistemas ofensivos: torpedos contra barcos y submarinos, y una salva

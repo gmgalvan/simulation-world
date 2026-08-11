@@ -22,6 +22,7 @@ from .entities import (
     DETECTS_SUBSURFACE,
     SURFACING_SECONDS,
     FIXED_WING,
+    FLYING,
     GRAVITY,
     GROUND,
     INFANTRY,
@@ -47,6 +48,9 @@ ENGAGEMENT_RADIUS = 190.0
 # once and never again. This gets a second and third salvo into a long one.
 STRATEGIC_SALVO_PERIOD = 55.0
 STRATEGIC_SALVO_SIZE = 3
+# Ship-launched anti-air missiles need time for radar confirmation and VLS
+# sequencing. Ground/ship strike missiles retain the destroyer's base cycle.
+NAVAL_AA_FIRE_PERIOD = 8.0
 
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
 # is more attractive, missing pairs default to 1.0. Tanks must not chase
@@ -988,6 +992,8 @@ class Battle:
                 self.effects.muzzle_flash(muzzle, scale=0.9)
                 self.effects.shell(unit, muzzle, direction, 235.0, 58.0)
                 return
+            if target.kind in FLYING:
+                unit.cooldown = NAVAL_AA_FIRE_PERIOD * self.rng.uniform(0.90, 1.10)
             self.effects.launch_missile(unit, target, NAVAL_STRIKE)
             self.stats.missile(unit.kind, unit.team, "misil naval")
             return
