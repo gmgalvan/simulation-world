@@ -667,6 +667,15 @@ class Battle:
         for unit in self.units:
             if not unit.alive:
                 continue
+            if unit.manual_controlled:
+                # Input applies movement and requests shots through the public
+                # manual API.  The autonomous target picker must not fight the
+                # player for steering or fire a second weapon here.
+                unit.target = None
+                unit.cooldown -= dt
+                self._animate(unit, dt)
+                self._update_damage_cues(unit, dt)
+                continue
             if unit.kind == "destroyer":
                 self._update_ciws_defense(unit, dt)
             target = self._acquire_target(unit)
@@ -721,16 +730,7 @@ class Battle:
             if engaged and unit.cooldown <= 0.0:
                 self._fire(unit, target)
 
-            # Wounded units show it, but a bleeding soldier is not a smoking
-            # engine: infantry drips instead of trailing a smoke column.
-            if unit.hp_frac < 0.4:
-                if unit.kind in INFANTRY:
-                    if self.rng.random() < dt * 3.0:
-                        self.effects.blood(
-                            unit.position + Vec3(0, 0, 0.3), scale=0.5, count=2
-                        )
-                elif self.rng.random() < dt * 9.0:
-                    self.effects.smoke_puff(unit.position, scale=1.1)
+            self._update_damage_cues(unit, dt)
 
         if self.city is not None:
             enemies = [
@@ -748,6 +748,93 @@ class Battle:
         )
         self._update_wrecks(dt)
         self._check_winner()
+
+    def _update_damage_cues(self, unit: Unit, dt: float) -> None:
+        """Show wounds for autonomous and player-controlled units alike."""
+        if unit.hp_frac >= 0.4:
+            return
+        if unit.kind in INFANTRY:
+            if self.rng.random() < dt * 3.0:
+                self.effects.blood(
+                    unit.position + Vec3(0, 0, 0.3), scale=0.5, count=2
+                )
+        elif self.rng.random() < dt * 9.0:
+            self.effects.smoke_puff(unit.position, scale=1.1)
+
+    def manual_rifle_fire(self, unit: Unit) -> bool:
+        """Fire one player-requested rifle burst along the soldier's view."""
+        if (
+            unit.kind != "rifleman"
+            or not unit.alive
+            or not unit.manual_controlled
+            or unit.cooldown > 0.0
+        ):
+            return False
+
+        unit.cooldown = unit.spec.fire_period * self.rng.uniform(0.85, 1.15)
+        self.stats.shot(unit.kind, unit.team)
+        muzzle = unit.muzzle()
+        target = self._manual_rifle_target(unit)
+        aim = muzzle + unit.forward * unit.spec.attack_range
+        if target is not None:
+            aim = target.position
+
+        self.effects.tracer(muzzle, aim, TEAM_COLORS[unit.team])
+        self.effects.muzzle_flash(muzzle, scale=0.35)
+        if target is None:
+            return True
+
+        distance = (target.position - muzzle).length()
+        close = 1.0 - min(1.0, distance / unit.spec.attack_range)
+        accuracy = 0.35 + 0.5 * close
+        if self.rng.random() < accuracy:
+            self._apply_damage(
+                unit,
+                target,
+                unit.spec.damage * self.rng.uniform(0.8, 1.2),
+                weapon="fusil",
+            )
+        return True
+
+    def _manual_rifle_target(self, unit: Unit):
+        """Return the nearest legal target inside a narrow forward aim cone."""
+        military = [
+            other
+            for other in self.units
+            if other.alive and other.team != unit.team
+        ]
+        candidates = military
+        if (
+            not military
+            and self.city is not None
+            and self.city.defending_team != unit.team
+        ):
+            candidates = self.city.targets
+
+        muzzle = unit.muzzle()
+        forward = Vec3(unit.forward)
+        forward.normalize()
+        best = None
+        best_score = float("inf")
+        for target in candidates:
+            if not target.alive or target.team == unit.team:
+                continue
+            delta = target.position - muzzle
+            distance = delta.length()
+            if distance <= 1e-6 or distance > unit.spec.attack_range:
+                continue
+            direction = Vec3(delta)
+            direction.normalize()
+            alignment = forward.dot(direction)
+            if alignment < 0.94 or not self._has_line_of_sight(unit, target):
+                continue
+            # Alignment wins first, then distance. This modest aim assistance
+            # makes the fixed centre crosshair usable without adding mouse-look
+            # state to the soldier controller.
+            score = (1.0 - alignment) * 120.0 + distance
+            if score < best_score:
+                best_score, best = score, target
+        return best
 
     def _update_ciws_defense(self, unit: Unit, dt: float) -> None:
         """Engage an airborne enemy missile currently homing on this ship."""

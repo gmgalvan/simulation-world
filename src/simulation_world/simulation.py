@@ -158,7 +158,7 @@ def _configure_panda(args) -> None:
         "textures-power-2 none",
     ]
     if args.shots:
-        settings.append("window-type offscreen")
+        settings.extend(("window-type offscreen", "load-display p3headlessgl"))
     loadPrcFileData("simulation-world", "\n".join(settings))
 
 

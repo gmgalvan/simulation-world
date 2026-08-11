@@ -267,6 +267,10 @@ class Unit:
         self.escape_dir = Vec3(0, 1, 0)
         self.climb_grade = 0.0  # slope straight ahead, slows the unit down
         self.target: Unit | None = None
+        # The autonomous battle skips movement and firing while a player owns
+        # this unit.  The controller lives outside Unit so input concerns do
+        # not leak into the reusable physics/entity layer.
+        self.manual_controlled = False
         # Procedural infantry animation.  The phase advances from actual
         # horizontal velocity, so steep climbs, firing halts and jams are
         # visible in the gait instead of feet skating at a fixed rate.
@@ -409,6 +413,20 @@ class Unit:
         velocity = self.velocity
         error = Vec3(desired.x - velocity.x, desired.y - velocity.y, 0)
         self.node.apply_central_force(error * self.spec.mass * gain)
+
+    def update_manual_rifleman(self, throttle: float, turn: float) -> None:
+        """Apply direct walking orders to a player-controlled rifleman."""
+        if self.kind != "rifleman" or not self.alive:
+            return
+        angular = self.node.get_angular_velocity()
+        self.node.set_angular_velocity(
+            Vec3(angular.x, angular.y, turn * self.spec.turn_rate)
+        )
+        speed = self.spec.cruise_speed * (1.0 if throttle >= 0.0 else 0.58)
+        self._drive_horizontal(
+            self.forward * (speed * throttle),
+            gain=self.spec.drive_gain,
+        )
 
     def _fly(
         self,

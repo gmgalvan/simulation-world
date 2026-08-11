@@ -191,6 +191,13 @@ La batería antiaérea usa la posición elevada de su estación óptica y sigue 
 blanco fijado por el radar; cuando no tiene uno, explora ligeramente por encima
 del horizonte.
 
+**Control directo del fusilero.** Mientras inspeccionas un **fusilero** vivo o
+ves desde sus ojos, pulsa `T` para tomarlo. La cámara pasa a primera persona:
+`W/S` avanzan y retroceden, `A/D` giran y el clic izquierdo dispara por la mira
+central. `T` devuelve la unidad a la IA. Esta opción no se ofrece al equipo RPG
+ni a vehículos. Si el fusilero cae, el control se libera automáticamente; sus
+disparos siguen usando la cadencia, precisión, daño y estadísticas normales.
+
 **Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
 zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
 coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
@@ -347,6 +354,8 @@ uv run main.py
 | `I` | **Inspeccionar una unidad de cerca** (entrar/salir) |
 | `TAB` / `SHIFT+TAB` | Unidad siguiente / anterior mientras inspeccionas |
 | `V` | Ver de frente desde la unidad seleccionada / volver al inspector |
+| `T` | Tomar / soltar el control del fusilero seleccionado |
+| `W/S`, `A/D`, clic izquierdo | Caminar, girar y disparar al controlar un fusilero |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |
@@ -480,6 +489,7 @@ src/simulation_world/
   entities.py                   # Unit: cuerpo rígido + modelo de vuelo/conducción
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
+  player_control.py             # control manual opcional del fusilero
   app.py                        # ventana, luces, cámara, HUD, bucle principal
   stats.py                      # recuento e informes TXT/JSON de la batalla
   simulation.py                 # CLI

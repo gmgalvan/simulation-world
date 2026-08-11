@@ -25,6 +25,7 @@ from panda3d.core import (
 from .assets import AssetLibrary
 from .battle import TEAM_COLORS, TEAM_NAMES, Battle
 from .chunks import ChunkManager
+from .player_control import RiflemanController
 from .terrain import WATER_COLOR, InfiniteTerrain
 
 SKY_COLOR = Vec4(0.52, 0.68, 0.86, 1.0)
@@ -82,6 +83,7 @@ class SimulationApp(ShowBase):
         self.inspect_angle = 0.0
         self.inspect_zoom = 1.0
         self.unit_view_masked = None
+        self.rifle_control = RiflemanController()
 
         self.disable_mouse()
         self.set_background_color(SKY_COLOR)
@@ -226,6 +228,15 @@ class SimulationApp(ShowBase):
             align=TextNode.A_center,
             mayChange=True,
         )
+        self.crosshair_text = OnscreenText(
+            text="+",
+            pos=(0.0, -0.025),
+            scale=0.055,
+            fg=(0.94, 0.96, 0.88, 0.92),
+            shadow=(0, 0, 0, 0.9),
+            align=TextNode.A_center,
+        )
+        self.crosshair_text.hide()
         self._refresh_help()
 
     def _inspect_label(self) -> str:
@@ -250,7 +261,12 @@ class SimulationApp(ShowBase):
         return f"{kind} ({team}) — vida {unit.hp_frac * 100:.0f}%"
 
     def _refresh_help(self) -> None:
-        if self.camera_mode == "free":
+        if self.rifle_control.active:
+            text = (
+                "FUSILERO: W/S avanzar-retroceder   A/D girar   "
+                "CLIC IZQ disparar   [T] soltar control   [ESPACIO] pausa"
+            )
+        elif self.camera_mode == "free":
             text = (
                 "LIBRE: WASD mover   Q/E bajar-subir   ARRASTRA raton para mirar   "
                 "RUEDA avanzar   SHIFT rapido   [C] camara   [R] batalla   [ESC] salir"
@@ -258,12 +274,13 @@ class SimulationApp(ShowBase):
         elif self.camera_mode == "inspect":
             text = (
                 "INSPECCION: [TAB] siguiente unidad   [SHIFT+TAB] anterior   "
-                "ARRASTRA girar   RUEDA acercar   [V] vista frontal   [I] salir"
+                "ARRASTRA girar   RUEDA acercar   [V] vista frontal   "
+                "[T] controlar fusilero   [I] salir"
             )
         elif self.camera_mode == "unit":
             text = (
                 "VISTA DE UNIDAD: [TAB] siguiente   [SHIFT+TAB] anterior   "
-                "[V] volver a inspeccion   [I] salir"
+                "[T] controlar fusilero   [V] volver a inspeccion   [I] salir"
             )
         else:
             text = (
@@ -287,15 +304,16 @@ class SimulationApp(ShowBase):
         # Drag to look around, wheel to zoom. Uses plain absolute mouse
         # coordinates rather than relative-mouse capture, which is far more
         # reliable across windowing setups.
-        self.accept("mouse1", self._grab_mouse)
+        self.accept("mouse1", self._grab_mouse, [True])
         self.accept("mouse1-up", self._release_mouse)
-        self.accept("mouse3", self._grab_mouse)
+        self.accept("mouse3", self._grab_mouse, [False])
         self.accept("mouse3-up", self._release_mouse)
         self.accept("wheel_up", self._zoom, [-1.0])
         self.accept("wheel_down", self._zoom, [1.0])
         # Inspector: get right up to a single unit and look it over.
         self.accept("i", self.toggle_inspect)
         self.accept("v", self.toggle_unit_view)
+        self.accept("t", self.toggle_rifle_control)
         self.accept("tab", self.cycle_inspect, [1])
         self.accept("shift-tab", self.cycle_inspect, [-1])
         # Held keys rather than key repeat: repeat rates are jerky and differ
@@ -308,6 +326,7 @@ class SimulationApp(ShowBase):
     # Commands
     # ------------------------------------------------------------------
     def _start_battle(self, seed: int) -> None:
+        self._release_rifle_control()
         if self.battle is not None:
             self.battle.cleanup()
         self.battle = Battle(
@@ -342,6 +361,7 @@ class SimulationApp(ShowBase):
             self._refresh_help()
 
     def cycle_camera(self) -> None:
+        self._release_rifle_control()
         self._restore_unit_view_parts()
         if self.camera_mode in CAMERA_MODES:
             index = CAMERA_MODES.index(self.camera_mode)
@@ -367,6 +387,7 @@ class SimulationApp(ShowBase):
         return [u for u in self.battle.units if not u.np.is_empty()]
 
     def toggle_inspect(self) -> None:
+        self._release_rifle_control()
         if self.camera_mode in ("inspect", "unit"):
             self._restore_unit_view_parts()
             self.camera_mode = "orbit"
@@ -384,6 +405,7 @@ class SimulationApp(ShowBase):
     def toggle_unit_view(self) -> None:
         """See straight ahead from the currently selected living unit."""
         if self.camera_mode == "unit":
+            self._release_rifle_control()
             self._restore_unit_view_parts()
             self.camera_mode = "inspect"
             self.camLens.set_near(0.8)
@@ -401,6 +423,27 @@ class SimulationApp(ShowBase):
         self.camLens.set_near(0.16)
         self._refresh_help()
 
+    def toggle_rifle_control(self) -> None:
+        """Take or release the selected rifleman from an inspection camera."""
+        if self.rifle_control.active:
+            self._release_rifle_control()
+            self._refresh_help()
+            return
+        if self.camera_mode not in ("inspect", "unit"):
+            return
+        if not self.rifle_control.take(self.inspect_unit):
+            return
+        self.camera_mode = "unit"
+        self.camLens.set_near(0.16)
+        self.crosshair_text.show()
+        self._refresh_help()
+
+    def _release_rifle_control(self) -> bool:
+        released = self.rifle_control.release()
+        if hasattr(self, "crosshair_text"):
+            self.crosshair_text.hide()
+        return released
+
     def _restore_unit_view_parts(self) -> None:
         """Restore pieces hidden only to keep a first-person view unobstructed."""
         if self.unit_view_masked is not None:
@@ -411,6 +454,7 @@ class SimulationApp(ShowBase):
 
     def cycle_inspect(self, step: int) -> None:
         """Step through every unit on the field, either team."""
+        self._release_rifle_control()
         units = self._inspectable()
         if self.camera_mode == "unit":
             units = [unit for unit in units if unit.alive]
@@ -506,11 +550,16 @@ class SimulationApp(ShowBase):
         self.camera.set_pos(position)
         self.camera.look_at(focus)
 
-    def _grab_mouse(self) -> None:
+    def _grab_mouse(self, fire_button: bool = False) -> None:
+        if self.rifle_control.active:
+            if fire_button:
+                self.rifle_control.firing = True
+            return
         self.dragging = True
         self._drag_from = None
 
     def _release_mouse(self) -> None:
+        self.rifle_control.firing = False
         self.dragging = False
         self._drag_from = None
 
@@ -606,6 +655,11 @@ class SimulationApp(ShowBase):
         dt = min(self.clock.get_dt(), 0.05)
         if not self.paused:
             self.sim_time += dt
+            had_control = self.rifle_control.active
+            self.rifle_control.update(self.keys, self.battle)
+            if had_control and not self.rifle_control.active:
+                self.crosshair_text.hide()
+                self._refresh_help()
             self.battle.step(dt)
             # Fixed-step the solver so behaviour does not depend on framerate.
             self._physics_debt += dt
@@ -620,7 +674,8 @@ class SimulationApp(ShowBase):
         self._write_report_once()
         suffix = "   ·   PAUSA" if self.paused else ""
         if self.camera_mode in ("inspect", "unit") and self.inspect_unit is not None:
-            self.status_text.setText(self._inspect_label() + suffix)
+            controlled = " — CONTROL MANUAL" if self.rifle_control.active else ""
+            self.status_text.setText(self._inspect_label() + controlled + suffix)
         else:
             self.status_text.setText(self.battle.status_text() + suffix)
         self._update_roster()
