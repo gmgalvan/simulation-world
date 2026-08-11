@@ -290,12 +290,14 @@ class Effects:
     # ------------------------------------------------------------------
     # Per-frame update
     # ------------------------------------------------------------------
-    def update(self, dt: float, on_hit, on_blast=None) -> None:
-        self._update_missiles(dt, on_hit, on_blast)
-        self._update_shells(dt, on_hit)
+    def update(self, dt: float, on_hit, on_blast=None, on_structure_hit=None) -> None:
+        self._update_missiles(dt, on_hit, on_blast, on_structure_hit)
+        self._update_shells(dt, on_hit, on_structure_hit)
         self._update_timed(dt)
 
-    def _update_missiles(self, dt: float, on_hit, on_blast=None) -> None:
+    def _update_missiles(
+        self, dt: float, on_hit, on_blast=None, on_structure_hit=None
+    ) -> None:
         alive: list[Missile] = []
         for missile in self.missiles:
             missile.update(dt)
@@ -309,10 +311,15 @@ class Effects:
 
             detonate = False
             victim = None
+            structure = None
             burst_at = current
 
             if missile.fuzed():
-                detonate, victim = True, missile.target
+                detonate = True
+                if getattr(missile.target, "city_asset", False):
+                    structure = missile.target
+                else:
+                    victim = missile.target
                 burst_at = Point3(missile.target.position)
             else:
                 # Sweep the travel so a fast round cannot pass through anything.
@@ -322,6 +329,7 @@ class Effects:
                 if hit_node is not None:
                     detonate = True
                     victim = hit_node.get_python_tag("unit")
+                    structure = hit_node.get_python_tag("city_target")
                     burst_at = hit_pos
                 elif missile.expired or current.z < self.terrain.height_at(
                     current.x, current.y
@@ -340,6 +348,12 @@ class Effects:
                         victim,
                         missile.spec.damage,
                         missile.spec.weapon_name,
+                    )
+                elif structure is not None and on_structure_hit is not None:
+                    on_structure_hit(
+                        missile.shooter,
+                        structure,
+                        missile.spec.damage,
                     )
                 missile.np.remove_node()
                 continue
@@ -379,7 +393,7 @@ class Effects:
 
         return best_node, best_pos
 
-    def _update_shells(self, dt: float, on_hit) -> None:
+    def _update_shells(self, dt: float, on_hit, on_structure_hit=None) -> None:
         alive: list[Shell] = []
         for shell in self.shells:
             shell.ttl -= dt
@@ -389,11 +403,13 @@ class Effects:
             # Sweep from the previous position so a fast round cannot tunnel.
             hit_node, hit_pos = self._sweep(shell, current)
             hit_unit = None
+            hit_structure = None
             detonated = False
 
             if hit_node is not None:
                 detonated = True
                 hit_unit = hit_node.get_python_tag("unit")
+                hit_structure = hit_node.get_python_tag("city_target")
                 current = hit_pos
 
             if not detonated and (
@@ -406,6 +422,8 @@ class Effects:
                 self.explosion(current, scale=1.1, debris_count=3)
                 if hit_unit is not None and getattr(hit_unit, "alive", False):
                     on_hit(shell.shooter, hit_unit, shell.damage)
+                elif hit_structure is not None and on_structure_hit is not None:
+                    on_structure_hit(shell.shooter, hit_structure, shell.damage)
                 shell.np.remove_node()
                 continue
 

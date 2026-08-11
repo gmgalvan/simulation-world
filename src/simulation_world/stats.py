@@ -23,6 +23,9 @@ KIND_LABELS = {
     "sam": "bateria antiaerea",
     "rocket": "equipo de RPG",
     "rifleman": "fusilero",
+    "building": "edificio civil",
+    "civilian_car": "coche civil",
+    "civilian": "civil",
 }
 TEAM_LABELS = {0: "Rojo", 1: "Azul"}
 
@@ -41,6 +44,7 @@ class BattleStats:
         self.salvos: collections.Counter = collections.Counter()
         self.missiles: collections.Counter = collections.Counter()
         self.deployed: collections.Counter = collections.Counter()
+        self.city: dict | None = None
         self.elapsed = 0.0
         self.winner: int | None = None
 
@@ -79,6 +83,26 @@ class BattleStats:
         self.elapsed = elapsed
         self.winner = winner
 
+    def city_result(
+        self,
+        defending_team: int,
+        buildings_alive: int,
+        buildings_total: int,
+        civilians_alive: int,
+        civilians_total: int,
+        cars_alive: int,
+        cars_total: int,
+    ) -> None:
+        self.city = {
+            "defending_team": TEAM_LABELS[defending_team],
+            "buildings_alive": buildings_alive,
+            "buildings_total": buildings_total,
+            "civilians_alive": civilians_alive,
+            "civilians_total": civilians_total,
+            "cars_alive": cars_alive,
+            "cars_total": cars_total,
+        }
+
     # ------------------------------------------------------------------
     # Reporting
     # ------------------------------------------------------------------
@@ -102,6 +126,25 @@ class BattleStats:
         )
         add(f"  resultado      {outcome}")
         add("")
+
+        if self.city is not None:
+            add("-" * 74)
+            add("  OBJETIVO CIUDAD")
+            add("-" * 74)
+            add(f"  equipo defensor  {self.city['defending_team']}")
+            add(
+                f"  edificios        {self.city['buildings_alive']} / "
+                f"{self.city['buildings_total']} en pie"
+            )
+            add(
+                f"  civiles          {self.city['civilians_alive']} / "
+                f"{self.city['civilians_total']} a salvo"
+            )
+            add(
+                f"  coches civiles   {self.city['cars_alive']} / "
+                f"{self.city['cars_total']} operativos"
+            )
+            add("")
 
         add("-" * 74)
         add("  FUERZAS DESPLEGADAS")
@@ -202,6 +245,7 @@ class BattleStats:
                 "duration_seconds": self.elapsed,
                 "winner": winner,
             },
+            "city": self.city,
             "deployed": [
                 {
                     "team": TEAM_LABELS[team],

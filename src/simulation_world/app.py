@@ -204,6 +204,18 @@ class SimulationApp(ShowBase):
                 mayChange=True,
             )
 
+        # Separate civil ledger: the military roster stays readable while the
+        # city shows both survivors and losses for every protected asset type.
+        self.civil_text = OnscreenText(
+            text="",
+            pos=(0.0, 0.725),
+            scale=0.038,
+            fg=(1, 1, 1, 1),
+            shadow=(0, 0, 0, 0.9),
+            align=TextNode.A_center,
+            mayChange=True,
+        )
+
         self.help_text = OnscreenText(
             text="",
             pos=(0.0, -0.94),
@@ -300,6 +312,7 @@ class SimulationApp(ShowBase):
             n_tanks=self.args.n_tanks,
             n_destroyers=self.args.n_destroyers,
             n_submarines=self.args.n_submarines,
+            city_enabled=self.args.city,
             n_osprey=self.args.n_osprey,
             n_jets=self.args.n_jets,
             n_sam=self.args.n_sam,
@@ -486,6 +499,8 @@ class SimulationApp(ShowBase):
             anchors.append((focus.x, focus.y))
             for unit in self.battle.alive_units():
                 anchors.append((unit.position.x, unit.position.y))
+            if self.battle.city is not None:
+                anchors.append(self.battle.city.origin)
         return anchors
 
     def _update(self, task):
@@ -547,6 +562,23 @@ class SimulationApp(ShowBase):
             counts = self.battle.roster(team)
             parts = [f"{label} {counts.get(kind, 0)}" for kind, label in ROSTER]
             text.setText(f"{TEAM_NAMES[team]:5} " + "   ".join(parts))
+        city = self.battle.city
+        if city is None:
+            self.civil_text.setText("")
+        else:
+            people_lost = city.initial_civilians - city.civilians_alive
+            cars_lost = city.initial_cars - city.cars_alive
+            buildings_lost = city.initial_buildings - city.buildings_alive
+            self.civil_text.setFg(TEAM_COLORS[city.defending_team])
+            self.civil_text.setText(
+                f"Civil {TEAM_NAMES[city.defending_team]}   "
+                f"personas {city.civilians_alive}/{city.initial_civilians} "
+                f"(bajas {people_lost})   "
+                f"coches {city.cars_alive}/{city.initial_cars} "
+                f"(destruidos {cars_lost})   "
+                f"edificios {city.buildings_alive}/{city.initial_buildings} "
+                f"(caídos {buildings_lost})"
+            )
         if self.status_text is not None and self.camera_mode != "inspect":
             self.status_text.setText(self.status_text.getText() + self._submarine_status())
 

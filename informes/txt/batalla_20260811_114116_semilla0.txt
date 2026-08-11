@@ -1,0 +1,125 @@
+==========================================================================
+  INFORME DE BATALLA
+==========================================================================
+  semilla        0
+  comenzada      2026-08-11 11:41:16
+  duracion       76.6 s simulados
+  resultado      gana Rojo
+
+--------------------------------------------------------------------------
+  OBJETIVO CIUDAD
+--------------------------------------------------------------------------
+  equipo defensor  Rojo
+  edificios        8 / 8 en pie
+  civiles          18 / 18 a salvo
+  coches civiles   6 / 6 operativos
+
+--------------------------------------------------------------------------
+  FUERZAS DESPLEGADAS
+--------------------------------------------------------------------------
+  unidad                    Rojo    Azul
+  caza F-35                   15      15
+  helicoptero Mi-24            3       3
+  convertiplano V-22           1       1
+  destructor                   1       1
+  submarino                    1       1
+  tanque Leopard 2             4       4
+  bateria antiaerea            2       2
+  equipo de RPG                3       3
+  fusilero                    16      16
+  edificio civil               8       0
+  coche civil                  6       0
+  civil                       18       0
+
+--------------------------------------------------------------------------
+  DISPAROS Y MUNICION
+--------------------------------------------------------------------------
+  unidad                  disparos R  disparos A
+  caza F-35                       42          26
+  helicoptero Mi-24               78          30
+  convertiplano V-22               4          18
+  destructor                      18           2
+  submarino                        3           3
+  tanque Leopard 2                23          13
+  bateria antiaerea                4           4
+  equipo de RPG                    3           0
+  fusilero                         1          12
+
+  misiles guiados           lanzados
+  misil aire-tierra               68
+  misil naval                     20
+  misil tierra-aire                8
+  misil de crucero                 6
+
+  salvas estrategicas de submarino: 6 misiles de crucero
+    Rojo  submarino                  3
+    Azul  submarino                  3
+
+--------------------------------------------------------------------------
+  PRECISION  (impactos sobre disparos, por tipo de atacante)
+--------------------------------------------------------------------------
+  unidad                  disparos  impactos   acierto        dano
+  caza F-35                     68        55       81%        5512
+  helicoptero Mi-24            108        63       58%         447
+  convertiplano V-22            22        12       55%          68
+  destructor                    20        18       90%        2430
+  submarino                      6        17      283%        1291
+  tanque Leopard 2              36        27       75%        1193
+  bateria antiaerea              8         8      100%         680
+  equipo de RPG                  3         0        0%           0
+  fusilero                      13         1        8%           4
+
+--------------------------------------------------------------------------
+  QUIEN DESTRUYO A QUIEN
+--------------------------------------------------------------------------
+  caza F-35           -> caza F-35                      11
+  tanque Leopard 2    -> fusilero                       11
+  submarino           -> fusilero                        7
+  destructor          -> caza F-35                       6
+  caza F-35           -> tanque Leopard 2                5
+  caza F-35           -> bateria antiaerea               4
+  bateria antiaerea   -> caza F-35                       4
+  helicoptero Mi-24   -> helicoptero Mi-24               3
+  caza F-35           -> fusilero                        2
+  caza F-35           -> equipo de RPG                   2
+  submarino           -> equipo de RPG                   2
+  tanque Leopard 2    -> helicoptero Mi-24               2
+  destructor          -> destructor                      1
+  destructor          -> submarino                       1
+  helicoptero Mi-24   -> convertiplano V-22              1
+  caza F-35           -> helicoptero Mi-24               1
+  caza F-35           -> convertiplano V-22              1
+
+  unidad                  bajas causadas    perdidas
+  caza F-35                           26          21
+  helicoptero Mi-24                    4           6
+  convertiplano V-22                   0           2
+  destructor                           8           1
+  submarino                            9           1
+  tanque Leopard 2                    13           5
+  bateria antiaerea                    4           4
+  equipo de RPG                        0           4
+  fusilero                             0          20
+
+  BAJAS ATRIBUIDAS POR ARMA
+  Rojo · caza F-35 / misil aire-tierra -> caza F-35                    7
+  Rojo · destructor / misil naval -> caza F-35                         6
+  Rojo · caza F-35 / misil aire-tierra -> tanque Leopard 2             4
+  Azul · caza F-35 / misil aire-tierra -> caza F-35                    4
+  Azul · submarino / misil de crucero -> fusilero                      4
+  Rojo · submarino / misil de crucero -> fusilero                      3
+  Rojo · caza F-35 / misil aire-tierra -> fusilero                     2
+  Rojo · caza F-35 / misil aire-tierra -> bateria antiaerea            2
+  Rojo · bateria antiaerea / misil tierra-aire -> caza F-35            2
+  Rojo · submarino / misil de crucero -> equipo de RPG                 2
+  Azul · caza F-35 / misil aire-tierra -> bateria antiaerea            2
+  Azul · bateria antiaerea / misil tierra-aire -> caza F-35            2
+  Rojo · destructor / misil naval -> destructor                        1
+  Rojo · destructor / misil naval -> submarino                         1
+  Rojo · caza F-35 / misil aire-tierra -> helicoptero Mi-24            1
+  Rojo · caza F-35 / misil aire-tierra -> equipo de RPG                1
+  Azul · caza F-35 / misil aire-tierra -> convertiplano V-22           1
+  Azul · caza F-35 / misil aire-tierra -> equipo de RPG                1
+  Azul · caza F-35 / misil aire-tierra -> tanque Leopard 2             1
+
+==========================================================================

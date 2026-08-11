@@ -70,7 +70,10 @@ desplazadas a un lado y repartidas en 360°.
 **Vegetación.** Bosque low-poly generado por chunk, sembrado desde una semilla
 derivada de las coordenadas del chunk: un trozo de mundo **vuelve a crecer
 exactamente igual** cada vez que se recarga. No crecen en el agua, en la playa
-ni por encima de la cota de nieve. Todos los árboles de un chunk se funden en un
+ni por encima de la cota de nieve. El bosque mezcla coníferas de copa escalonada
+y ramas bajas visibles con árboles caducifolios de troncos ahusados, ramas y
+ramitas bifurcadas, copas redondeadas irregulares y grupos de hojas puntiagudas;
+ya no utiliza cubos para tronco y follaje. Todos los árboles de un chunk se funden en un
 único `Geom` (una sola llamada de dibujado) y son **decorativos**: no entran al
 mundo de Bullet, porque darles collider a cientos taparía los raycasts de línea
 de visión por todas partes y atascaría la batalla.
@@ -197,6 +200,56 @@ atribución al misil de crucero. Vive en su propio módulo
 unidad**, en el color del equipo, para leer de un vistazo qué le queda a cada
 uno en vez de solo un total.
 
+**Ciudad defendida.** Con `--city=true` (valor predeterminado), una ciudad
+procedural aparece en un lateral del despliegue y queda bajo la protección de
+un equipo elegido por la semilla. Tiene ocho edificios destructibles con
+colisión, una red completa de calles continuas que siguen el relieve, seis
+coches en circulación y dieciocho
+civiles. Fachadas, coches, ropa y señalización heredan el rojo o azul del
+equipo defensor. Coches y peatones usan colisionadores físicos y los carriles
+opuestos están separados para evitar que el tráfico se atraviese. Al detectar
+enemigos o una explosión, las personas que están fuera corren al edificio sano
+más cercano. Si un refugio baja de 35% de integridad, sus ocupantes evacúan y
+buscan otro; un edificio destruido cae, explota y deja escombros.
+
+La arquitectura mezcla cuatro familias procedurales: torres contemporáneas de
+ladrillo oscuro, zócalo de piedra, ventanas amplias con crucetas, marquesina,
+parapeto y equipos de azotea;
+rascacielos art déco con retranqueos, ventanas alineadas y agujas; y edificios
+cívicos con cornisas, pórticos, columnas, tambor y cúpulas sólidas facetadas;
+además de residenciales de uso mixto con ventanas individuales, balcones,
+locales y cuartos de azotea. La piedra, metal, cristal y ladrillo usan paletas
+arquitectónicas propias; el color del equipo queda limitado a toldos, placas y
+banderas sujetas a los mástiles. Cada semilla varía
+anchos, fondos, alturas y tonos sin perder la identificación del defensor.
+
+Los civiles son personajes low-poly completos, con variantes masculinas y
+femeninas, distintas estaturas, tonos de piel, cabello, ropa, rostro, brazos,
+manos, piernas y calzado. Una prenda conserva el color del defensor para poder
+identificarlos sin convertir el cuerpo entero en una ficha roja o azul. Al
+correr muestran balanceo y desplazamiento vertical del cuerpo.
+
+Los coches se generan como sedanes, hatchbacks y SUV de carrocería continua,
+con cabina perfilada, parabrisas inclinado, cristales laterales, espejos, manijas,
+faros, calaveras, defensas, placas y ruedas con neumático y rin. Las ruedas giran
+al circular y la velocidad real del vehículo se utiliza para guiar proyectiles.
+
+La selección de blancos ocurre en dos fases estrictas: mientras quede una sola
+unidad militar enemiga, edificios, coches y civiles no pueden ser elegidos como
+objetivos. Solo después de derrotar a todas las fuerzas defensoras comienza la
+fase urbana y la batalla continúa sobre los activos civiles expuestos. Sus
+impactos, bajas y el arma responsable quedan registrados en los informes TXT y
+JSON como parte de las estadísticas.
+
+El HUD muestra `E` (edificios), `P` (personas) y `V` (vehículos civiles). El defensor pierde
+si queda en pie 40% o menos de los edificios o sobrevive 50% o menos de la
+población. Los submarinos solo pueden dirigir sus salvas contra la ciudad
+cuando ya no queda ninguna unidad militar enemiga.
+Usa `--city=false` para jugar la batalla militar clásica sin ciudad.
+
+La tabla completa de fases, umbrales y casos límite está en
+[`docs/condiciones-de-victoria.md`](docs/condiciones-de-victoria.md).
+
 **Guerra naval.** El mar corre a ambos lados del campo. El **destructor** lleva
 tres escalones de armamento: CIWS/ametralladoras a menos de 82 m, cañón Mk 45
 de 127 mm entre 82 y 310 m, y misiles guiados de hasta 1200 m contra aire y
@@ -299,6 +352,7 @@ uv run main.py --help
 | Opción | Por defecto | Qué hace |
 |---|---|---|
 | `--seed N` | `0` | Semilla del mundo y del despliegue |
+| `--city BOOL` | `true` | Ciudad defendida con edificios, coches y civiles (`--city=false` la desactiva) |
 | `--n-heli N` | `3` | Helicópteros por equipo |
 | `--n-tanks N` | `4` | Tanques por equipo |
 | `--n-destroyers N` | `1` | Destructores por equipo. Misiles de 1200 m contra aire y tierra, y sonar para cazar submarinos |
@@ -313,7 +367,7 @@ uv run main.py --help
 | `--feature-scale N` | `220` | Escala de los accidentes. Más alto = valles y sierras más amplios |
 | `--view-chunks N` | `5` | Radio de terreno cargado, en chunks. Más = ves más lejos y cuesta más |
 | `--chunk-size N` | `128` | Lado de cada chunk en metros |
-| `--trees N` | `110` | Árboles **por chunk** (`0` para ninguno) |
+| `--trees N` | `65` | Árboles orgánicos **por chunk** (`0` para ninguno) |
 | `--deploy N` | `240` | Separación inicial entre los dos bandos |
 | `--resolution AxB` | `1600x900` | Tamaño de ventana o captura |
 | `--assets DIR` | `./assets` | Carpeta de modelos |
@@ -392,6 +446,7 @@ src/simulation_world/
   terrain.py                    # ruido infinito -> malla + collider por chunk
   chunks.py                     # streaming: carga/descarga alrededor de la accion
   scenery.py                    # bosque low-poly procedural (fundido en un Geom)
+  city.py                       # ciudad, edificios, coches, civiles y refugios
   assets.py                     # carga de modelos y placeholders procedurales
                                 #   (los nueve tipos, con geometría lofteada)
   missiles.py                   # misiles guiados: navegación proporcional
@@ -399,7 +454,7 @@ src/simulation_world/
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
   app.py                        # ventana, luces, cámara, HUD, bucle principal
-  stats.py                      # recuento e informe .txt de la batalla
+  stats.py                      # recuento e informes TXT/JSON de la batalla
   simulation.py                 # CLI
 ```
 

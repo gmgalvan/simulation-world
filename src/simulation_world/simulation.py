@@ -6,6 +6,15 @@ import argparse
 from pathlib import Path
 
 
+def _bool_flag(value: str) -> bool:
+    normalized = value.strip().lower()
+    if normalized in {"1", "true", "yes", "si", "sí", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise argparse.ArgumentTypeError("usa true/false, yes/no, si/no o 1/0")
+
+
 def build_argparser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="simulation-world",
@@ -15,6 +24,13 @@ def build_argparser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--seed", type=int, default=0, help="Semilla del terreno y del despliegue.")
+    parser.add_argument(
+        "--city",
+        type=_bool_flag,
+        default=True,
+        metavar="BOOL",
+        help="Activa la ciudad defendida (true por defecto; usa --city=false para quitarla).",
+    )
     parser.add_argument("--n-heli", type=int, default=3, help="Helicópteros por equipo.")
     parser.add_argument("--n-tanks", type=int, default=4, help="Tanques por equipo.")
     parser.add_argument(
@@ -26,13 +42,13 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-destroyers",
         type=int,
-        default=1,
+        default=2,
         help="Destructores lanzamisiles por equipo. Operan desde el agua contra aire y tierra.",
     )
     parser.add_argument(
         "--n-jets",
         type=int,
-        default=7,
+        default=15,
         help="Cazas F-35 por equipo. No pueden quedarse quietos: hacen pasadas de ataque.",
     )
     parser.add_argument(
@@ -80,7 +96,7 @@ def build_argparser() -> argparse.ArgumentParser:
         "--chunk-size", type=float, default=128.0, help="Lado de cada chunk de terreno en metros."
     )
     parser.add_argument(
-        "--trees", type=int, default=110, help="Árboles por chunk (0 para ninguno)."
+        "--trees", type=int, default=65, help="Árboles orgánicos por chunk (0 para ninguno)."
     )
     parser.add_argument(
         "--deploy",

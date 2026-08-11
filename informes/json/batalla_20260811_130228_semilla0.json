@@ -1,0 +1,682 @@
+{
+  "metadata": {
+    "seed": 0,
+    "started": "2026-08-11T13:02:28",
+    "duration_seconds": 83.99999999999737,
+    "winner": "Rojo"
+  },
+  "city": {
+    "defending_team": "Rojo",
+    "buildings_alive": 8,
+    "buildings_total": 8,
+    "civilians_alive": 18,
+    "civilians_total": 18,
+    "cars_alive": 6,
+    "cars_total": 6
+  },
+  "deployed": [
+    {
+      "team": "Rojo",
+      "unit": "building",
+      "unit_label": "edificio civil",
+      "count": 8
+    },
+    {
+      "team": "Rojo",
+      "unit": "civilian",
+      "unit_label": "civil",
+      "count": 18
+    },
+    {
+      "team": "Rojo",
+      "unit": "civilian_car",
+      "unit_label": "coche civil",
+      "count": 6
+    },
+    {
+      "team": "Rojo",
+      "unit": "destroyer",
+      "unit_label": "destructor",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "unit": "helicopter",
+      "unit_label": "helicoptero Mi-24",
+      "count": 3
+    },
+    {
+      "team": "Rojo",
+      "unit": "jet",
+      "unit_label": "caza F-35",
+      "count": 15
+    },
+    {
+      "team": "Rojo",
+      "unit": "osprey",
+      "unit_label": "convertiplano V-22",
+      "count": 1
+    },
+    {
+      "team": "Rojo",
+      "unit": "rifleman",
+      "unit_label": "fusilero",
+      "count": 16
+    },
+    {
+      "team": "Rojo",
+      "unit": "rocket",
+      "unit_label": "equipo de RPG",
+      "count": 3
+    },
+    {
+      "team": "Rojo",
+      "unit": "sam",
+      "unit_label": "bateria antiaerea",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "unit": "submarine",
+      "unit_label": "submarino",
+      "count": 1
+    },
+    {
+      "team": "Rojo",
+      "unit": "tank",
+      "unit_label": "tanque Leopard 2",
+      "count": 4
+    },
+    {
+      "team": "Azul",
+      "unit": "destroyer",
+      "unit_label": "destructor",
+      "count": 2
+    },
+    {
+      "team": "Azul",
+      "unit": "helicopter",
+      "unit_label": "helicoptero Mi-24",
+      "count": 3
+    },
+    {
+      "team": "Azul",
+      "unit": "jet",
+      "unit_label": "caza F-35",
+      "count": 15
+    },
+    {
+      "team": "Azul",
+      "unit": "osprey",
+      "unit_label": "convertiplano V-22",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "unit": "rifleman",
+      "unit_label": "fusilero",
+      "count": 16
+    },
+    {
+      "team": "Azul",
+      "unit": "rocket",
+      "unit_label": "equipo de RPG",
+      "count": 3
+    },
+    {
+      "team": "Azul",
+      "unit": "sam",
+      "unit_label": "bateria antiaerea",
+      "count": 2
+    },
+    {
+      "team": "Azul",
+      "unit": "submarine",
+      "unit_label": "submarino",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "unit": "tank",
+      "unit_label": "tanque Leopard 2",
+      "count": 4
+    }
+  ],
+  "shots": [
+    {
+      "team": "Rojo",
+      "unit": "destroyer",
+      "count": 32
+    },
+    {
+      "team": "Rojo",
+      "unit": "helicopter",
+      "count": 53
+    },
+    {
+      "team": "Rojo",
+      "unit": "jet",
+      "count": 37
+    },
+    {
+      "team": "Rojo",
+      "unit": "rifleman",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "unit": "rocket",
+      "count": 6
+    },
+    {
+      "team": "Rojo",
+      "unit": "submarine",
+      "count": 3
+    },
+    {
+      "team": "Rojo",
+      "unit": "tank",
+      "count": 15
+    },
+    {
+      "team": "Azul",
+      "unit": "destroyer",
+      "count": 22
+    },
+    {
+      "team": "Azul",
+      "unit": "helicopter",
+      "count": 50
+    },
+    {
+      "team": "Azul",
+      "unit": "jet",
+      "count": 43
+    },
+    {
+      "team": "Azul",
+      "unit": "osprey",
+      "count": 22
+    },
+    {
+      "team": "Azul",
+      "unit": "rifleman",
+      "count": 2
+    },
+    {
+      "team": "Azul",
+      "unit": "sam",
+      "count": 6
+    },
+    {
+      "team": "Azul",
+      "unit": "submarine",
+      "count": 3
+    }
+  ],
+  "guided_weapons": [
+    {
+      "team": "Rojo",
+      "unit": "destroyer",
+      "weapon": "misil naval",
+      "launched": 32
+    },
+    {
+      "team": "Rojo",
+      "unit": "jet",
+      "weapon": "misil aire-tierra",
+      "launched": 37
+    },
+    {
+      "team": "Rojo",
+      "unit": "submarine",
+      "weapon": "misil de crucero",
+      "launched": 3
+    },
+    {
+      "team": "Azul",
+      "unit": "destroyer",
+      "weapon": "misil naval",
+      "launched": 22
+    },
+    {
+      "team": "Azul",
+      "unit": "jet",
+      "weapon": "misil aire-tierra",
+      "launched": 43
+    },
+    {
+      "team": "Azul",
+      "unit": "sam",
+      "weapon": "misil tierra-aire",
+      "launched": 6
+    },
+    {
+      "team": "Azul",
+      "unit": "submarine",
+      "weapon": "misil de crucero",
+      "launched": 3
+    }
+  ],
+  "strategic_salvos": [
+    {
+      "team": "Rojo",
+      "unit": "submarine",
+      "missiles_launched": 3
+    },
+    {
+      "team": "Azul",
+      "unit": "submarine",
+      "missiles_launched": 3
+    }
+  ],
+  "hits_and_damage": [
+    {
+      "attacker": "destroyer",
+      "target": "destroyer",
+      "hits": 6,
+      "damage": 810.0
+    },
+    {
+      "attacker": "destroyer",
+      "target": "jet",
+      "hits": 30,
+      "damage": 4050.0
+    },
+    {
+      "attacker": "destroyer",
+      "target": "osprey",
+      "hits": 1,
+      "damage": 135.0
+    },
+    {
+      "attacker": "destroyer",
+      "target": "submarine",
+      "hits": 2,
+      "damage": 270.0
+    },
+    {
+      "attacker": "helicopter",
+      "target": "helicopter",
+      "hits": 51,
+      "damage": 338.04541496226454
+    },
+    {
+      "attacker": "helicopter",
+      "target": "osprey",
+      "hits": 18,
+      "damage": 125.70362869257927
+    },
+    {
+      "attacker": "helicopter",
+      "target": "tank",
+      "hits": 2,
+      "damage": 12.07859886750223
+    },
+    {
+      "attacker": "jet",
+      "target": "helicopter",
+      "hits": 4,
+      "damage": 420.0
+    },
+    {
+      "attacker": "jet",
+      "target": "jet",
+      "hits": 24,
+      "damage": 2520.0
+    },
+    {
+      "attacker": "jet",
+      "target": "osprey",
+      "hits": 1,
+      "damage": 105.0
+    },
+    {
+      "attacker": "jet",
+      "target": "rifleman",
+      "hits": 3,
+      "damage": 472.5
+    },
+    {
+      "attacker": "jet",
+      "target": "rocket",
+      "hits": 3,
+      "damage": 315.0
+    },
+    {
+      "attacker": "jet",
+      "target": "sam",
+      "hits": 8,
+      "damage": 840.0
+    },
+    {
+      "attacker": "jet",
+      "target": "tank",
+      "hits": 18,
+      "damage": 1417.5
+    },
+    {
+      "attacker": "osprey",
+      "target": "helicopter",
+      "hits": 14,
+      "damage": 76.41841925294668
+    },
+    {
+      "attacker": "rifleman",
+      "target": "rifleman",
+      "hits": 2,
+      "damage": 7.008825799875586
+    },
+    {
+      "attacker": "rocket",
+      "target": "helicopter",
+      "hits": 1,
+      "damage": 74.0
+    },
+    {
+      "attacker": "rocket",
+      "target": "osprey",
+      "hits": 1,
+      "damage": 74.0
+    },
+    {
+      "attacker": "rocket",
+      "target": "rifleman",
+      "hits": 2,
+      "damage": 66.60000000000001
+    },
+    {
+      "attacker": "sam",
+      "target": "jet",
+      "hits": 6,
+      "damage": 510.0
+    },
+    {
+      "attacker": "submarine",
+      "target": "rifleman",
+      "hits": 17,
+      "damage": 1393.1223263635354
+    },
+    {
+      "attacker": "submarine",
+      "target": "rocket",
+      "hits": 1,
+      "damage": 63.29983963685878
+    },
+    {
+      "attacker": "submarine",
+      "target": "tank",
+      "hits": 4,
+      "damage": 158.0005188549266
+    },
+    {
+      "attacker": "tank",
+      "target": "helicopter",
+      "hits": 3,
+      "damage": 114.0
+    },
+    {
+      "attacker": "tank",
+      "target": "osprey",
+      "hits": 2,
+      "damage": 76.0
+    },
+    {
+      "attacker": "tank",
+      "target": "rifleman",
+      "hits": 8,
+      "damage": 425.59999999999997
+    }
+  ],
+  "kills": [
+    {
+      "attacker": "destroyer",
+      "target": "destroyer",
+      "count": 2
+    },
+    {
+      "attacker": "destroyer",
+      "target": "jet",
+      "count": 17
+    },
+    {
+      "attacker": "destroyer",
+      "target": "submarine",
+      "count": 1
+    },
+    {
+      "attacker": "helicopter",
+      "target": "helicopter",
+      "count": 2
+    },
+    {
+      "attacker": "jet",
+      "target": "helicopter",
+      "count": 2
+    },
+    {
+      "attacker": "jet",
+      "target": "jet",
+      "count": 10
+    },
+    {
+      "attacker": "jet",
+      "target": "osprey",
+      "count": 1
+    },
+    {
+      "attacker": "jet",
+      "target": "rifleman",
+      "count": 3
+    },
+    {
+      "attacker": "jet",
+      "target": "rocket",
+      "count": 3
+    },
+    {
+      "attacker": "jet",
+      "target": "sam",
+      "count": 4
+    },
+    {
+      "attacker": "jet",
+      "target": "tank",
+      "count": 6
+    },
+    {
+      "attacker": "osprey",
+      "target": "helicopter",
+      "count": 1
+    },
+    {
+      "attacker": "rifleman",
+      "target": "rifleman",
+      "count": 2
+    },
+    {
+      "attacker": "rocket",
+      "target": "helicopter",
+      "count": 1
+    },
+    {
+      "attacker": "sam",
+      "target": "jet",
+      "count": 3
+    },
+    {
+      "attacker": "submarine",
+      "target": "rifleman",
+      "count": 10
+    },
+    {
+      "attacker": "submarine",
+      "target": "rocket",
+      "count": 1
+    },
+    {
+      "attacker": "submarine",
+      "target": "tank",
+      "count": 1
+    },
+    {
+      "attacker": "tank",
+      "target": "osprey",
+      "count": 1
+    },
+    {
+      "attacker": "tank",
+      "target": "rifleman",
+      "count": 8
+    }
+  ],
+  "weapon_kills": [
+    {
+      "team": "Rojo",
+      "attacker": "destroyer",
+      "weapon": "misil naval",
+      "target": "destroyer",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "attacker": "destroyer",
+      "weapon": "misil naval",
+      "target": "jet",
+      "count": 11
+    },
+    {
+      "team": "Rojo",
+      "attacker": "destroyer",
+      "weapon": "misil naval",
+      "target": "submarine",
+      "count": 1
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "helicopter",
+      "count": 1
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "jet",
+      "count": 4
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "rifleman",
+      "count": 3
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "rocket",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "sam",
+      "count": 2
+    },
+    {
+      "team": "Rojo",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "tank",
+      "count": 3
+    },
+    {
+      "team": "Rojo",
+      "attacker": "submarine",
+      "weapon": "misil de crucero",
+      "target": "rifleman",
+      "count": 5
+    },
+    {
+      "team": "Rojo",
+      "attacker": "submarine",
+      "weapon": "misil de crucero",
+      "target": "rocket",
+      "count": 1
+    },
+    {
+      "team": "Rojo",
+      "attacker": "submarine",
+      "weapon": "misil de crucero",
+      "target": "tank",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "attacker": "destroyer",
+      "weapon": "misil naval",
+      "target": "jet",
+      "count": 6
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "helicopter",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "jet",
+      "count": 6
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "osprey",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "rocket",
+      "count": 1
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "sam",
+      "count": 2
+    },
+    {
+      "team": "Azul",
+      "attacker": "jet",
+      "weapon": "misil aire-tierra",
+      "target": "tank",
+      "count": 3
+    },
+    {
+      "team": "Azul",
+      "attacker": "sam",
+      "weapon": "misil tierra-aire",
+      "target": "jet",
+      "count": 3
+    },
+    {
+      "team": "Azul",
+      "attacker": "submarine",
+      "weapon": "misil de crucero",
+      "target": "rifleman",
+      "count": 5
+    }
+  ]
+}

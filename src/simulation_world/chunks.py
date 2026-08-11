@@ -31,7 +31,7 @@ class ChunkManager:
         world,
         view_radius: int = 5,
         physics_radius: int = 3,
-        trees_per_chunk: int = 120,
+        trees_per_chunk: int = 65,
         build_budget: int = 2,
     ) -> None:
         self.terrain = terrain

@@ -8,6 +8,7 @@ import random
 from panda3d.core import NodePath, Point3, Vec3
 
 from .assets import make_health_bar
+from .city import CITY_EXTENT, City
 from .effects import Effects
 from .stats import BattleStats
 from .missiles import (
@@ -160,6 +161,15 @@ DAMAGE_VS = {
     ("destroyer", "rifleman"): 1.5,
 }
 
+CITY_PREFERENCE = {
+    # These weights are used only after the opposing military is gone. Exposed
+    # people must visibly participate in the urban phase instead of every
+    # attacker spending that phase on the much larger building colliders.
+    "civilian": 0.55,
+    "civilian_car": 0.82,
+    "building": 0.95,
+}
+
 
 def ballistic_pitch(distance: float, rise: float, speed: float) -> float | None:
     """Launch angle for the flat (low) arc, or None if the shot cannot reach."""
@@ -188,6 +198,7 @@ class Battle:
         n_rockets: int = 3,
         n_destroyers: int = 1,
         n_submarines: int = 1,
+        city_enabled: bool = True,
         seed: int = 0,
         deploy_radius: float = 240.0,
         origin: tuple[float, float] = (0.0, 0.0),
@@ -211,11 +222,59 @@ class Battle:
         self.stats = BattleStats(seed)
         self.deploy_radius = deploy_radius
         self.origin = origin
+        self.city: City | None = None
+
+        if city_enabled:
+            city_rng = random.Random(seed + 8_119)
+            defending_team = city_rng.randrange(2)
+            self.city = City(
+                self.root,
+                self.world,
+                self.terrain,
+                self._city_site(defending_team, city_rng),
+                defending_team,
+                seed,
+            )
+            for building in self.city.buildings:
+                self.stats.deploy(building.kind, building.team)
+            for civilian in self.city.civilians:
+                self.stats.deploy(civilian.kind, civilian.team)
+            for car in self.city.cars:
+                self.stats.deploy(car.kind, car.team)
 
         self._spawn(
             n_heli, n_tanks, n_osprey, n_jets, n_sam, n_rifles, n_rockets,
             n_destroyers, n_submarines,
         )
+
+    def _city_site(
+        self, defending_team: int, rng: random.Random
+    ) -> tuple[float, float]:
+        """Find a broad dry shoulder beside one team's deployment corridor."""
+        ox, oy = self.origin
+        team_sign = -1.0 if defending_team == 0 else 1.0
+        side_sign = -1.0 if rng.random() < 0.5 else 1.0
+        base_x = ox + team_sign * self.deploy_radius * 0.46
+        base_y = oy + side_sign * self.deploy_radius * 0.72
+        margin = self.terrain.water_level + 3.0
+        fallback = (base_x, base_y)
+        corners = CITY_EXTENT * 0.72
+        for _ in range(100):
+            x = base_x + rng.uniform(-48.0, 48.0)
+            y = base_y + rng.uniform(-42.0, 42.0)
+            samples = [
+                self.terrain.height_at(x + dx, y + dy)
+                for dx, dy in (
+                    (0, 0), (-corners, -corners), (corners, -corners),
+                    (-corners, corners), (corners, corners),
+                )
+            ]
+            if min(samples) <= margin:
+                continue
+            fallback = (x, y)
+            if max(samples) - min(samples) < 9.0 and self.terrain.normal_at(x, y).z > 0.92:
+                return x, y
+        return fallback
 
     # ------------------------------------------------------------------
     # Setup
@@ -515,7 +574,7 @@ class Battle:
         ceiling = self.terrain.height_at(point.x, point.y) + 18.0
         return Point3(point.x, point.y, min(point.z, ceiling))
 
-    def _can_detect(self, observer: Unit, target: Unit) -> bool:
+    def _can_detect(self, observer: Unit, target) -> bool:
         """Whether `observer` can even see `target`.
 
         A surfaced submarine is visible to everyone. While submerged, only
@@ -527,9 +586,22 @@ class Battle:
             return observer.kind in DETECTS_SUBSURFACE
         return True
 
-    def _pick_target(self, unit: Unit) -> Unit | None:
+    def _pick_target(self, unit: Unit):
         best, best_score = None, float("inf")
-        for other in self.units:
+        military_targets = [
+            other
+            for other in self.units
+            if other.alive and other.team != unit.team
+        ]
+        candidates = military_targets
+        if (
+            not military_targets
+            and self.city is not None
+            and unit.team != self.city.defending_team
+            and unit.kind != "submarine"
+        ):
+            candidates = self.city.targets
+        for other in candidates:
             if not other.alive or other.team == unit.team:
                 continue
             if not self._can_detect(unit, other):
@@ -539,14 +611,16 @@ class Battle:
             # a whole squad does not converge on the exact same victim.
             score = (
                 distance
-                * PREFERENCE.get((unit.kind, other.kind), 1.0)
+                * PREFERENCE.get(
+                    (unit.kind, other.kind), CITY_PREFERENCE.get(other.kind, 1.0)
+                )
                 * self.rng.uniform(0.75, 1.3)
             )
             if score < best_score:
                 best_score, best = score, other
         return best
 
-    def _acquire_target(self, unit: Unit) -> Unit | None:
+    def _acquire_target(self, unit: Unit):
         """Stick with the current target until it dies or breaks away.
 
         Without this every unit re-picks the nearest enemy each frame, fire
@@ -559,13 +633,14 @@ class Battle:
                 return current
         return self._pick_target(unit)
 
-    def _has_line_of_sight(self, unit: Unit, target: Unit) -> bool:
+    def _has_line_of_sight(self, unit: Unit, target) -> bool:
         result = self.world.ray_test_closest(unit.muzzle(), target.position)
         if not result.has_hit():
             return True
         node = result.get_node()
         hit_unit = node.get_python_tag("unit") if node is not None else None
-        return hit_unit is target
+        hit_city = node.get_python_tag("city_target") if node is not None else None
+        return hit_unit is target or hit_city is target
 
     # ------------------------------------------------------------------
     # Simulation step
@@ -628,7 +703,20 @@ class Battle:
                 elif self.rng.random() < dt * 9.0:
                     self.effects.smoke_puff(unit.position, scale=1.1)
 
-        self.effects.update(dt, self._apply_damage, self._apply_blast)
+        if self.city is not None:
+            enemies = [
+                unit
+                for unit in self.units
+                if unit.alive and unit.team != self.city.defending_team
+            ]
+            self.city.update(dt, self.effects, enemies)
+
+        self.effects.update(
+            dt,
+            self._apply_damage,
+            self._apply_blast,
+            self._apply_structure_damage,
+        )
         self._update_wrecks(dt)
         self._check_winner()
 
@@ -655,6 +743,19 @@ class Battle:
                 spec.damage * falloff,
                 weapon=spec.weapon_name,
             )
+        if self.city is not None:
+            self.city.apply_blast(
+                position,
+                spec.damage,
+                radius,
+                self.effects,
+                lambda target, amount: self._apply_damage(
+                    shooter, target, amount, weapon=spec.weapon_name
+                ),
+            )
+
+    def _apply_structure_damage(self, shooter: Unit, target, amount: float) -> None:
+        self._apply_damage(shooter, target, amount)
 
     def _fire_strategic_salvo(self, unit: Unit) -> bool:
         """Cruise-missile salvo at land targets anywhere, ignoring range and LOS.
@@ -665,12 +766,24 @@ class Battle:
         """
         enemies = [o for o in self.units if o.alive and o.team != unit.team]
         targets = [o for o in enemies if o.kind in GROUND]
+        city_targets = []
+        if (
+            not enemies
+            and self.city is not None
+            and self.city.defending_team != unit.team
+        ):
+            city_targets = [building for building in self.city.buildings if building.alive]
+            city_targets.sort(
+                key=lambda building: (
+                    building.position - unit.position
+                ).length_squared()
+            )
         if not targets:
             # Nothing ashore left. Fall back to whatever is out there, or two
             # navies in separate seas simply stare at each other forever —
             # neither can reach the other with anything but this.
             targets = enemies
-        if not targets:
+        if not targets and not city_targets:
             return False
 
         # Prefer valuable armour/air-defence while still including distance so
@@ -682,7 +795,10 @@ class Battle:
                 target.id,
             )
         )
-        selected = targets[:STRATEGIC_SALVO_SIZE]
+        if city_targets:
+            selected = city_targets[:STRATEGIC_SALVO_SIZE]
+        else:
+            selected = targets[:STRATEGIC_SALVO_SIZE]
         offsets = (-0.9, 0.0, 0.9)
         for index, target in enumerate(selected):
             self.effects.launch_missile(
@@ -826,7 +942,7 @@ class Battle:
             unit.upper_body.set_p(-speed_ratio * 7.0 * unit.gait_blend)
             unit.upper_body.set_r(-cycle * 2.8 * unit.gait_blend)
 
-    def _fire(self, unit: Unit, target: Unit) -> None:
+    def _fire(self, unit: Unit, target) -> None:
         unit.cooldown = unit.spec.fire_period * self.rng.uniform(0.85, 1.15)
         self.stats.shot(unit.kind, unit.team)
         # Armour and launcher teams shoot from a halt; the halt outlives the
@@ -944,7 +1060,7 @@ class Battle:
     def _apply_damage(
         self,
         shooter: Unit,
-        target: Unit,
+        target,
         amount: float,
         weapon: str | None = None,
     ) -> None:
@@ -952,6 +1068,14 @@ class Battle:
             return
         amount *= DAMAGE_VS.get((shooter.kind, target.kind), 1.0)
         self.stats.hit(shooter.kind, target.kind, shooter.team, amount)
+
+        if getattr(target, "city_asset", False):
+            if self.city is None:
+                return
+            if self.city.damage_target(target, amount, self.effects):
+                self.kills[shooter.team] += 1
+                self.stats.kill(shooter.kind, target.kind, shooter.team, weapon)
+            return
 
         # Infantry bleeds; vehicles burn. A hit that does not kill still marks
         # a soldier, which is most of the visual feedback a 2 m unit can give.
@@ -987,23 +1111,68 @@ class Battle:
     def _check_winner(self) -> None:
         if self.winner is not None:
             return
+        if self.city is not None and self.city.failed:
+            self.winner = 1 - self.city.defending_team
+            self.stats.city_result(
+                self.city.defending_team,
+                self.city.buildings_alive,
+                self.city.initial_buildings,
+                self.city.civilians_alive,
+                self.city.initial_civilians,
+                self.city.cars_alive,
+                self.city.initial_cars,
+            )
+            self.stats.finish(self.elapsed, self.winner)
+            return
         teams = {u.team for u in self.units if u.alive}
         if len(teams) <= 1:
-            self.winner = next(iter(teams)) if teams else -1
+            remaining = next(iter(teams)) if teams else None
+            # If only the attacking army remains, the battle enters its urban
+            # phase. It ends after the city objective fails, not at the instant
+            # the last defending soldier falls.
+            if (
+                self.city is not None
+                and remaining is not None
+                and remaining != self.city.defending_team
+            ):
+                return
+            self.winner = remaining if remaining is not None else (
+                self.city.defending_team if self.city is not None else -1
+            )
+            if self.city is not None:
+                self.stats.city_result(
+                    self.city.defending_team,
+                    self.city.buildings_alive,
+                    self.city.initial_buildings,
+                    self.city.civilians_alive,
+                    self.city.initial_civilians,
+                    self.city.cars_alive,
+                    self.city.initial_cars,
+                )
             self.stats.finish(self.elapsed, self.winner)
 
     def status_text(self) -> str:
         if self.winner is None:
-            return (
+            text = (
                 f"Rojo {self.alive_count(0)}  vs  Azul {self.alive_count(1)}"
                 f"      bajas  R:{self.kills[1]}  A:{self.kills[0]}"
             )
+            if self.city is not None:
+                text += (
+                    f"   |   ciudad {TEAM_NAMES[self.city.defending_team]} "
+                    f"E:{self.city.buildings_alive}/{self.city.initial_buildings} "
+                    f"P:{self.city.civilians_alive}/{self.city.initial_civilians} "
+                    f"V:{self.city.cars_alive}/{self.city.initial_cars}"
+                )
+            return text
         if self.winner == -1:
             return "Empate: aniquilación mutua   ·   [R] nueva batalla"
         return f"¡Gana el equipo {TEAM_NAMES[self.winner]}!   ·   [R] nueva batalla"
 
     def cleanup(self) -> None:
         self.effects.clear()
+        if self.city is not None:
+            self.city.cleanup()
         for unit in self.units:
             if not unit.np.is_empty():
                 self.world.remove(unit.node)
