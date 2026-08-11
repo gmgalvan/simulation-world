@@ -319,7 +319,10 @@ class Battle:
             for i in range(n_osprey):
                 x = ox + sign * self.rng.uniform(half * 0.85, half)
                 y = oy + self.rng.uniform(-plain_half, plain_half)
-                cruise = 34.0 + i * 6.0
+                # Tiltrotors transit above the helicopter stack: high enough
+                # to read as a faster aeroplane-like profile, still far below
+                # the fixed-wing fighter layer.
+                cruise = 58.0 + i * 8.0
                 z = max(self.terrain.height_at(x, y), self.terrain.water_level) + cruise
                 unit = self._make_unit("osprey", team, color, Vec3(x, y, z), heading)
                 unit.cruise_alt = cruise

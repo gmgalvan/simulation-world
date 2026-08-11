@@ -135,6 +135,8 @@ de visión por todas partes y atascaría la batalla.
   frente a frente se quedarían atascadas para siempre.
 - El **convertiplano** bascula sus góndolas: horizontal (modo avión) para el
   traslado, donde vuela un 135% más rápido, y vertical al entrar en combate.
+  Su capa base es de 58 m sobre el terreno, por encima de la formación normal
+  de helicópteros (38, 46 y 54 m) y muy por debajo de los cazas (desde 135 m).
   El basculado es una animación real de las góndolas, no un cambio de textura.
   Ojo: el V-22 real es un **transporte**, no un cañonero, así que está
   modelado como rápido y resistente pero poco armado y menos ágil.

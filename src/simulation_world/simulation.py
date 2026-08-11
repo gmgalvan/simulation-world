@@ -69,7 +69,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-osprey",
         type=int,
-        default=1,
+        default=3,
         help="Convertiplanos (tiltrotor tipo V-22) por equipo. Rápidos y duros, poco armados.",
     )
     parser.add_argument("--relief", type=float, default=46.0, help="Altura máxima del relieve.")
