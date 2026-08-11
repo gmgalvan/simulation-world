@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import collections
 import datetime
+import json
 from pathlib import Path
 
 # Display order and labels, so the report reads the same way every time.
@@ -36,6 +37,7 @@ class BattleStats:
         self.hits: collections.Counter = collections.Counter()
         self.damage: collections.Counter = collections.Counter()
         self.kills: collections.Counter = collections.Counter()
+        self.weapon_kills: collections.Counter = collections.Counter()
         self.salvos: collections.Counter = collections.Counter()
         self.missiles: collections.Counter = collections.Counter()
         self.deployed: collections.Counter = collections.Counter()
@@ -62,8 +64,16 @@ class BattleStats:
         self.hits[(shooter_kind, target_kind)] += 1
         self.damage[(shooter_kind, target_kind)] += amount
 
-    def kill(self, shooter_kind: str, target_kind: str, team: int) -> None:
+    def kill(
+        self,
+        shooter_kind: str,
+        target_kind: str,
+        team: int,
+        weapon: str | None = None,
+    ) -> None:
         self.kills[(shooter_kind, target_kind)] += 1
+        if weapon:
+            self.weapon_kills[(team, shooter_kind, weapon, target_kind)] += 1
 
     def finish(self, elapsed: float, winner: int | None) -> None:
         self.elapsed = elapsed
@@ -162,12 +172,115 @@ class BattleStats:
                 lost = sum(n for (_, b), n in self.kills.items() if b == kind)
                 if caused or lost:
                     add(f"  {KIND_LABELS[kind]:22}{caused:>16}{lost:>12}")
+        if self.weapon_kills:
+            add("")
+            add("  BAJAS ATRIBUIDAS POR ARMA")
+            for (team, shooter, weapon, victim), count in sorted(
+                self.weapon_kills.items(),
+                key=lambda item: (-item[1], item[0]),
+            ):
+                description = (
+                    f"{TEAM_LABELS[team]} · {KIND_LABELS.get(shooter, shooter)} / "
+                    f"{weapon} -> {KIND_LABELS.get(victim, victim)}"
+                )
+                add(f"  {description:<66}{count:>4}")
         add("")
         add("=" * 74)
         return "\n".join(lines)
 
-    def write(self, directory: str | Path = ".") -> Path:
-        path = Path(directory) / f"batalla_{self.started:%Y%m%d_%H%M%S}_semilla{self.seed}.txt"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(self.render(), encoding="utf-8")
-        return path
+    def as_dict(self) -> dict:
+        """Serializable form of the complete report, without tuple keys."""
+        winner = {
+            0: "Rojo",
+            1: "Azul",
+            -1: "aniquilacion mutua",
+        }.get(self.winner, "sin resolver")
+        return {
+            "metadata": {
+                "seed": self.seed,
+                "started": self.started.isoformat(timespec="seconds"),
+                "duration_seconds": self.elapsed,
+                "winner": winner,
+            },
+            "deployed": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "unit": kind,
+                    "unit_label": KIND_LABELS.get(kind, kind),
+                    "count": count,
+                }
+                for (team, kind), count in sorted(self.deployed.items())
+            ],
+            "shots": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "unit": kind,
+                    "count": count,
+                }
+                for (team, kind), count in sorted(self.shots.items())
+            ],
+            "guided_weapons": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "unit": kind,
+                    "weapon": weapon,
+                    "launched": count,
+                }
+                for (team, kind, weapon), count in sorted(self.missiles.items())
+            ],
+            "strategic_salvos": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "unit": kind,
+                    "missiles_launched": count,
+                }
+                for (team, kind), count in sorted(self.salvos.items())
+            ],
+            "hits_and_damage": [
+                {
+                    "attacker": attacker,
+                    "target": target,
+                    "hits": count,
+                    "damage": self.damage[(attacker, target)],
+                }
+                for (attacker, target), count in sorted(self.hits.items())
+            ],
+            "kills": [
+                {
+                    "attacker": attacker,
+                    "target": target,
+                    "count": count,
+                }
+                for (attacker, target), count in sorted(self.kills.items())
+            ],
+            "weapon_kills": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "attacker": attacker,
+                    "weapon": weapon,
+                    "target": target,
+                    "count": count,
+                }
+                for (team, attacker, weapon, target), count in sorted(
+                    self.weapon_kills.items()
+                )
+            ],
+        }
+
+    def write(self, directory: str | Path = ".") -> tuple[Path, Path]:
+        """Write matching human-readable and machine-readable reports."""
+        root = Path(directory)
+        txt_dir = root / "txt"
+        json_dir = root / "json"
+        txt_dir.mkdir(parents=True, exist_ok=True)
+        json_dir.mkdir(parents=True, exist_ok=True)
+
+        stem = f"batalla_{self.started:%Y%m%d_%H%M%S}_semilla{self.seed}"
+        txt_path = txt_dir / f"{stem}.txt"
+        json_path = json_dir / f"{stem}.json"
+        txt_path.write_text(self.render(), encoding="utf-8")
+        json_path.write_text(
+            json.dumps(self.as_dict(), ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        return txt_path, json_path

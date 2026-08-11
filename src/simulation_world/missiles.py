@@ -28,6 +28,7 @@ GRAVITY = 9.81
 class MissileSpec:
     """Airframe and seeker of one class of missile."""
 
+    weapon_name: str = "misil guiado"
     launch_speed: float = 45.0
     burn_speed: float = 130.0
     burn_time: float = 1.1
@@ -42,6 +43,10 @@ class MissileSpec:
     lifetime: float = 9.0
     damage: float = 100.0
     trail_rate: float = 26.0    # smoke puffs per second
+    # Most guided rounds damage only the tracked victim. Strategic warheads
+    # carry a real blast radius and a larger visual detonation.
+    blast_radius: float = 0.0
+    explosion_scale: float = 1.9
     # Depth below the water line at which the weapon runs. Set for torpedoes;
     # None for anything that flies. A running weapon holds this depth and
     # steers only in the horizontal plane.
@@ -53,6 +58,7 @@ class MissileSpec:
 
 
 AIR_TO_GROUND = MissileSpec(
+    weapon_name="misil aire-tierra",
     burn_speed=145.0,
     nav_constant=3.5,
     max_lateral_g=8.0,
@@ -61,6 +67,7 @@ AIR_TO_GROUND = MissileSpec(
 )
 
 TORPEDO = MissileSpec(
+    weapon_name="torpedo",
     launch_speed=14.0,
     burn_speed=32.0,        # water is not air: a torpedo is slow
     burn_time=2.0,
@@ -75,6 +82,7 @@ TORPEDO = MissileSpec(
 )
 
 SURFACE_TO_AIR = MissileSpec(
+    weapon_name="misil tierra-aire",
     launch_speed=38.0,
     burn_speed=170.0,
     burn_time=1.4,
@@ -93,6 +101,7 @@ SURFACE_TO_AIR = MissileSpec(
 # Ship-launched multipurpose missile: strategic range from the side seas, but
 # less agile than a dedicated SAM against a hard-turning fighter.
 NAVAL_STRIKE = MissileSpec(
+    weapon_name="misil naval",
     launch_speed=42.0,
     burn_speed=230.0,
     burn_time=1.8,
@@ -103,10 +112,11 @@ NAVAL_STRIKE = MissileSpec(
     damage=135.0,
 )
 
-# Four-minute strategic salvo. Its guidance has no tactical range gate: the
+# Submarine strategic salvo. Its guidance has no tactical range gate: the
 # long lifetime and lofted mid-course arc let it reach any active combat unit
 # in the streamed world, including targets hidden behind mountain ranges.
 STRATEGIC_STRIKE = MissileSpec(
+    weapon_name="misil de crucero",
     launch_speed=58.0,
     burn_speed=315.0,
     burn_time=3.0,
@@ -117,6 +127,8 @@ STRATEGIC_STRIKE = MissileSpec(
     lifetime=120.0,
     damage=155.0,
     trail_rate=30.0,
+    blast_radius=34.0,
+    explosion_scale=5.8,
     loft_altitude=220.0,
 )
 

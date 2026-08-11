@@ -32,7 +32,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-jets",
         type=int,
-        default=14,
+        default=7,
         help="Cazas F-35 por equipo. No pueden quedarse quietos: hacen pasadas de ataque.",
     )
     parser.add_argument(
@@ -42,7 +42,7 @@ def build_argparser() -> argparse.ArgumentParser:
         help="Baterías antiaéreas por equipo. Superan en alcance a los cazas; contra tierra casi no hacen nada.",
     )
     parser.add_argument(
-        "--n-rifles", type=int, default=6, help="Fusileros (AK-47) por equipo."
+        "--n-rifles", type=int, default=16, help="Fusileros (AK-47) por equipo."
     )
     parser.add_argument(
         "--n-rockets",
@@ -92,7 +92,7 @@ def build_argparser() -> argparse.ArgumentParser:
         "--stats-dir",
         default="informes",
         metavar="DIR",
-        help="Carpeta donde se guarda el informe .txt al terminar la batalla.",
+        help="Carpeta base para informes; crea subcarpetas txt/ y json/.",
     )
     parser.add_argument(
         "--assets",

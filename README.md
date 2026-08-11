@@ -184,34 +184,41 @@ zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
 coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
 bastante más fiable entre sistemas de ventanas.
 
-**Informe de batalla.** Al terminar, escribe un `.txt` en `informes/` con las
-fuerzas desplegadas, disparos y misiles por tipo, **precisión de cada unidad** y
-la matriz completa de quién destruyó a quién. Vive en su propio módulo
+**Informe de batalla.** Al terminar, escribe el mismo informe en dos formatos:
+`informes/txt/*.txt` para lectura y `informes/json/*.json` para análisis. Ambos
+incluyen las fuerzas desplegadas, disparos y misiles por tipo, **precisión de cada unidad** y
+la matriz completa de quién destruyó a quién. Las bajas causadas por armas
+guiadas también indican el arma exacta y el equipo, por ejemplo
+`Azul · submarino / torpedo -> destructor`; el daño radial conserva la
+atribución al misil de crucero. Vive en su propio módulo
 (`stats.py`) porque contar cosas no tiene nada que ver con simular: solo observa.
 
 **HUD.** Marcador con las bajas de cada bando y una **leyenda por tipo de
 unidad**, en el color del equipo, para leer de un vistazo qué le queda a cada
 uno en vez de solo un total.
 
-**Guerra naval.** El mar corre a ambos lados del campo, así que cada flota
-queda detrás de su propia línea y dispara por encima de ella. El **destructor**
-lleva misiles de 1200 m contra aire y tierra. El **submarino** navega sumergido
-—91% del tiempo en las mediciones— y **solo emerge para lanzar** su salva de
-crucero, que alcanza cualquier objetivo terrestre del mundo cada cuatro minutos.
-Esa arma vivía antes en el destructor, donde un alcance sin límite tenía mucho
-menos sentido.
+**Guerra naval.** El mar corre a ambos lados del campo. El **destructor** lleva
+tres escalones de armamento: CIWS/ametralladoras a menos de 82 m, cañón Mk 45
+de 127 mm entre 82 y 310 m, y misiles guiados de hasta 1200 m contra aire y
+tierra. También posee sonar y puede atacar submarinos.
+
+El **submarino** navega sumergido —91% del tiempo en las mediciones— y lleva
+solo dos sistemas ofensivos: torpedos contra barcos y submarinos, y una salva
+estratégica de hasta tres misiles contra objetivos lejanos. La primera salva se
+prepara en 30 s y las siguientes cada 55 s. Para lanzarla emerge durante 7 s:
+mientras está en superficie puede ser detectado por cualquier unidad.
 
 Ambas flotas comparten **el mismo canal de mar**, separadas a lo largo de él, y
 navegan al encuentro. Repartirlas entre los dos mares laterales con tierra en
 medio hacía que no pudieran alcanzarse con nada salvo la salva, y una partida
 que acababa solo con unidades navales **se quedaba atascada para siempre**.
 
-El submarino **solo es visible para aeronaves, otros submarinos y destructores**
-(cazar submarinos es justo para lo que existe un destructor): nada más
-en la simulación lleva sonar, así que para un tanque o un fusilero sencillamente
-no está ahí. Contra blancos a flote usa **torpedos**: lentos, poco maniobreros, pero un
-impacto en el casco es casi decisivo, y dejan estela de espuma en la superficie.
-Contra tierra no tiene nada salvo la salva.
+Cuando está sumergido, el submarino **solo es visible para aeronaves, otros
+submarinos y destructores**. Contra blancos a flote usa **torpedos**: lentos,
+poco maniobreros, pero un impacto en el casco es casi decisivo y deja estela de
+espuma. Contra tierra no tiene nada salvo la salva. Cada misil estratégico
+inflige hasta 155 puntos en el centro y tiene un radio explosivo de 34 m con
+caída de daño hasta 25% en el borde; la detonación grande arroja 18 fragmentos.
 
 **Efectos.** Trazadoras, fogonazos, explosiones, escombros con física propia,
 columnas de humo en unidades dañadas, barras de vida y sombras del sol.
@@ -295,9 +302,6 @@ uv run main.py --help
 | `--n-heli N` | `3` | Helicópteros por equipo |
 | `--n-tanks N` | `4` | Tanques por equipo |
 | `--n-destroyers N` | `1` | Destructores por equipo. Misiles de 1200 m contra aire y tierra, y sonar para cazar submarinos |
-
-Los destructores seleccionan su arma automáticamente: misil guiado para blancos a más de 310 m, cañón naval de 127 mm a distancia media y CIWS/ametralladoras contra amenazas cercanas (menos de 82 m).
-Además, cada destructor prepara durante 4 minutos una salva estratégica de hasta 3 misiles. Al quedar lista, ataca unidades terrestres enemigas en cualquier punto activo del mundo, sin límite táctico de alcance ni línea de visión. La trayectoria se calcula en `missiles.py`: lanzamiento vertical, arco parabólico guiado con 220 m de altura adicional nominal y picado terminal con navegación proporcional. En modo inspección se muestra la cuenta regresiva.
 | `--n-jets N` | `4` | Cazas F-35 por equipo |
 | `--n-submarines N` | `1` | Submarinos por equipo. Sumergidos, con torpedos y la salva de crucero |
 | `--n-sam N` | `2` | Baterías antiaéreas por equipo |
@@ -313,10 +317,14 @@ Además, cada destructor prepara durante 4 minutos una salva estratégica de has
 | `--deploy N` | `240` | Separación inicial entre los dos bandos |
 | `--resolution AxB` | `1600x900` | Tamaño de ventana o captura |
 | `--assets DIR` | `./assets` | Carpeta de modelos |
-| `--stats-dir DIR` | `informes` | Dónde se guarda el informe `.txt` al terminar |
+| `--stats-dir DIR` | `informes` | Carpeta base; crea `txt/` y `json/` para cada formato |
 | `--shots N` | — | Modo sin ventana: guarda N capturas PNG |
 | `--shots-dir DIR` | `shots` | Carpeta de las capturas |
 | `--shot-interval N` | `1.5` | Segundos simulados entre capturas |
+
+Los destructores seleccionan su arma automáticamente: misil guiado para blancos a más de 310 m, cañón naval de 127 mm a distancia media y CIWS/ametralladoras contra amenazas cercanas (menos de 82 m).
+
+El submarino prepara la primera salva estratégica en 30 s y después otra cada 55 s. Ataca hasta 3 objetivos en cualquier punto activo del mundo, sin límite táctico de alcance ni línea de visión. La trayectoria se calcula en `missiles.py`: lanzamiento vertical, arco parabólico guiado con 220 m de altura adicional nominal y picado terminal con navegación proporcional. Su explosión causa daño radial en 34 m. En modo inspección se muestra la cuenta regresiva.
 
 Batalla grande y mucha distancia de visión:
 

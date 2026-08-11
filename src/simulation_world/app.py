@@ -223,7 +223,7 @@ class SimulationApp(ShowBase):
         team = TEAM_NAMES[unit.team]
         if not unit.alive:
             return f"{kind} ({team}) — destruido"
-        if unit.kind == "destroyer":
+        if unit.kind == "submarine":
             remaining = max(0, math.ceil(unit.strategic_cooldown))
             strategic = (
                 "LISTO"
@@ -518,8 +518,9 @@ class SimulationApp(ShowBase):
             return
         self._report_written = True
         try:
-            path = self.battle.stats.write(self.args.stats_dir)
-            print(f"[informe] estadisticas guardadas en {path}")
+            txt_path, json_path = self.battle.stats.write(self.args.stats_dir)
+            print(f"[informe] TXT  guardado en {txt_path}")
+            print(f"[informe] JSON guardado en {json_path}")
         except OSError as exc:
             print(f"[informe] no se pudo escribir el informe: {exc}")
 

@@ -133,7 +133,8 @@ class Effects:
         pieces = []
         # Kept dim and few: additive blending saturates to flat white fast.
         palette = ((0.95, 0.55, 0.12, 1.0), (0.85, 0.32, 0.07, 1.0), (0.98, 0.74, 0.26, 1.0))
-        for i in range(5):
+        piece_count = max(5, min(14, round(scale * 2.2)))
+        for i in range(piece_count):
             size = scale * random.uniform(0.55, 1.15)
             piece = make_box((size, size, size), palette[i % len(palette)])
             piece.reparent_to(root)
@@ -146,7 +147,8 @@ class Effects:
             piece.set_hpr(random.uniform(0, 360), random.uniform(0, 360), 0)
             pieces.append((piece, direction * scale * random.uniform(1.4, 3.2)))
 
-        self.fireballs.append(Fireball(root, 0.45, pieces, scale))
+        duration = 0.45 + min(0.45, scale * 0.06)
+        self.fireballs.append(Fireball(root, duration, pieces, scale))
         self._spawn_debris(position, scale, debris_count)
 
     def _spawn_debris(self, position: Point3, scale: float, count: int) -> None:
@@ -288,12 +290,12 @@ class Effects:
     # ------------------------------------------------------------------
     # Per-frame update
     # ------------------------------------------------------------------
-    def update(self, dt: float, on_hit) -> None:
-        self._update_missiles(dt, on_hit)
+    def update(self, dt: float, on_hit, on_blast=None) -> None:
+        self._update_missiles(dt, on_hit, on_blast)
         self._update_shells(dt, on_hit)
         self._update_timed(dt)
 
-    def _update_missiles(self, dt: float, on_hit) -> None:
+    def _update_missiles(self, dt: float, on_hit, on_blast=None) -> None:
         alive: list[Missile] = []
         for missile in self.missiles:
             missile.update(dt)
@@ -327,9 +329,18 @@ class Effects:
                     detonate = True
 
             if detonate:
-                self.explosion(burst_at, scale=1.9, debris_count=5)
-                if victim is not None and getattr(victim, "alive", False):
-                    on_hit(missile.shooter, victim, missile.spec.damage)
+                scale = missile.spec.explosion_scale
+                debris = 18 if missile.spec.blast_radius > 0.0 else 5
+                self.explosion(burst_at, scale=scale, debris_count=debris)
+                if missile.spec.blast_radius > 0.0 and on_blast is not None:
+                    on_blast(missile.shooter, burst_at, missile.spec)
+                elif victim is not None and getattr(victim, "alive", False):
+                    on_hit(
+                        missile.shooter,
+                        victim,
+                        missile.spec.damage,
+                        missile.spec.weapon_name,
+                    )
                 missile.np.remove_node()
                 continue
 

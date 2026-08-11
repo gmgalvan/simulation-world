@@ -518,11 +518,12 @@ class Battle:
     def _can_detect(self, observer: Unit, target: Unit) -> bool:
         """Whether `observer` can even see `target`.
 
-        Only aircraft and other submarines can find a submerged boat; nothing
-        else in this simulation carries sonar, so for a tank or a rifleman it
-        may as well not be there.
+        A surfaced submarine is visible to everyone. While submerged, only
+        sonar-equipped naval units and aircraft can acquire it.
         """
         if target.kind in SUBSURFACE:
+            if target.is_surfaced(self.terrain.water_level):
+                return True
             return observer.kind in DETECTS_SUBSURFACE
         return True
 
@@ -593,8 +594,6 @@ class Battle:
                 unit.update_jet(dt, self.terrain, target, engaged)
             elif unit.kind in NAVAL:
                 unit.update_naval(dt, self.terrain, target, engaged)
-            elif unit.kind in NAVAL:
-                unit.update_naval(dt, self.terrain, target, engaged)
             else:
                 unit.update_ground(dt, self.terrain, target, engaged)
 
@@ -629,9 +628,33 @@ class Battle:
                 elif self.rng.random() < dt * 9.0:
                     self.effects.smoke_puff(unit.position, scale=1.1)
 
-        self.effects.update(dt, self._apply_damage)
+        self.effects.update(dt, self._apply_damage, self._apply_blast)
         self._update_wrecks(dt)
         self._check_winner()
+
+    def _apply_blast(self, shooter: Unit, position: Point3, spec) -> None:
+        """Damage every enemy inside a strategic warhead's blast radius.
+
+        Damage falls linearly but retains 25% at the edge, so nearby infantry
+        and light vehicles cannot stand beside the primary target unharmed.
+        """
+        radius = spec.blast_radius
+        if radius <= 0.0:
+            return
+        centre = Vec3(position)
+        for target in self.units:
+            if not target.alive or target.team == shooter.team:
+                continue
+            distance = (Vec3(target.position) - centre).length()
+            if distance > radius:
+                continue
+            falloff = max(0.25, 1.0 - distance / radius)
+            self._apply_damage(
+                shooter,
+                target,
+                spec.damage * falloff,
+                weapon=spec.weapon_name,
+            )
 
     def _fire_strategic_salvo(self, unit: Unit) -> bool:
         """Cruise-missile salvo at land targets anywhere, ignoring range and LOS.
@@ -918,7 +941,13 @@ class Battle:
             trail=unit.kind == "rocket",
         )
 
-    def _apply_damage(self, shooter: Unit, target: Unit, amount: float) -> None:
+    def _apply_damage(
+        self,
+        shooter: Unit,
+        target: Unit,
+        amount: float,
+        weapon: str | None = None,
+    ) -> None:
         if not target.alive:
             return
         amount *= DAMAGE_VS.get((shooter.kind, target.kind), 1.0)
@@ -932,7 +961,7 @@ class Battle:
         if target.take_damage(amount):
             target.health_bar.hide()
             self.kills[shooter.team] += 1
-            self.stats.kill(shooter.kind, target.kind, shooter.team)
+            self.stats.kill(shooter.kind, target.kind, shooter.team, weapon)
             if target.kind in INFANTRY:
                 self.effects.blood(target.position + Vec3(0, 0, 0.5), scale=1.5, count=14)
             else:
