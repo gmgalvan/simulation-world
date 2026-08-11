@@ -250,6 +250,9 @@ class Unit:
         self.health = spec.max_health
         self.alive = True
         self.cooldown = 0.0
+        # Independent close-in defensive channel for destroyers. It prevents
+        # an incoming-missile burst from being tied to the main gun/VLS reload.
+        self.ciws_cooldown = 0.0
         # Strategic naval strike is independent of the normal weapon cooldown.
         # Only the submarine carries the strategic battery.
         self.strategic_cooldown = 30.0 if kind in SUBSURFACE else 0.0

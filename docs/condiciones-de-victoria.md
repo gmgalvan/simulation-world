@@ -48,6 +48,11 @@ expuestas, luego a los vehículos y finalmente a los edificios. La distancia y
 una pequeña variación determinista evitan que todo el ejército elija exactamente
 el mismo blanco.
 
+El destructor es la excepción naval: en esta fase selecciona exclusivamente
+edificios y emplea su misil de ataque terrestre con trayectoria elevada. Así
+puede atacar desde el mar aun cuando la costa o una loma oculten la fachada. El
+resto de las unidades conserva las prioridades urbanas generales.
+
 En esta fase los submarinos atacantes pueden dirigir sus salvas estratégicas
 contra edificios de la ciudad.
 

@@ -13,6 +13,7 @@ from .effects import Effects
 from .stats import BattleStats
 from .missiles import (
     AIR_TO_GROUND,
+    NAVAL_LAND_ATTACK,
     NAVAL_STRIKE,
     STRATEGIC_STRIKE,
     SURFACE_TO_AIR,
@@ -51,6 +52,8 @@ STRATEGIC_SALVO_SIZE = 3
 # Ship-launched anti-air missiles need time for radar confirmation and VLS
 # sequencing. Ground/ship strike missiles retain the destroyer's base cycle.
 NAVAL_AA_FIRE_PERIOD = 8.0
+CIWS_MISSILE_RANGE = 135.0
+CIWS_DEFENSIVE_PERIOD = 0.18
 
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
 # is more attractive, missing pairs default to 1.0. Tanks must not chase
@@ -604,7 +607,14 @@ class Battle:
             and unit.team != self.city.defending_team
             and unit.kind != "submarine"
         ):
-            candidates = self.city.targets
+            # Surface combatants use their land-attack battery against fixed
+            # infrastructure. Other surviving attackers handle exposed people
+            # and traffic according to the general urban priorities.
+            candidates = (
+                [building for building in self.city.buildings if building.alive]
+                if unit.kind == "destroyer"
+                else self.city.targets
+            )
         for other in candidates:
             if not other.alive or other.team == unit.team:
                 continue
@@ -654,15 +664,27 @@ class Battle:
         for unit in self.units:
             if not unit.alive:
                 continue
+            if unit.kind == "destroyer":
+                self._update_ciws_defense(unit, dt)
             target = self._acquire_target(unit)
             unit.target = target
 
             # One raycast per unit per frame, shared by the mover and the gun.
+            target_distance = (
+                (target.position - unit.position).length()
+                if target is not None else float("inf")
+            )
+            lofted_city_strike = (
+                target is not None
+                and unit.kind == "destroyer"
+                and getattr(target, "kind", None) == "building"
+                and target_distance > 310.0
+            )
             engaged = (
                 target is not None
-                and (target.position - unit.position).length() <= unit.spec.attack_range
+                and target_distance <= unit.spec.attack_range
                 and unit.can_bear(target)
-                and self._has_line_of_sight(unit, target)
+                and (lofted_city_strike or self._has_line_of_sight(unit, target))
             )
 
             if unit.kind == "helicopter":
@@ -723,6 +745,44 @@ class Battle:
         )
         self._update_wrecks(dt)
         self._check_winner()
+
+    def _update_ciws_defense(self, unit: Unit, dt: float) -> None:
+        """Engage an airborne enemy missile currently homing on this ship."""
+        unit.ciws_cooldown = max(0.0, unit.ciws_cooldown - dt)
+        if unit.ciws_cooldown > 0.0:
+            return
+
+        incoming = []
+        for missile in self.effects.missiles:
+            shooter_team = getattr(missile.shooter, "team", unit.team)
+            if (
+                missile.target is unit
+                and shooter_team != unit.team
+                and missile.spec.run_depth is None
+            ):
+                distance = (missile.position - unit.position).length()
+                if distance <= CIWS_MISSILE_RANGE:
+                    incoming.append((distance, missile))
+        if not incoming:
+            return
+
+        distance, missile = min(incoming, key=lambda item: item[0])
+        muzzle = unit.naval_ciws_muzzle()
+        self.effects.tracer(muzzle, missile.position, TEAM_COLORS[unit.team])
+        self.effects.muzzle_flash(muzzle, scale=0.34)
+        self.stats.shot(unit.kind, unit.team)
+        unit.ciws_cooldown = CIWS_DEFENSIVE_PERIOD
+        # Do not let the same mount attack a nearby unit in this exact burst.
+        unit.cooldown = max(unit.cooldown, CIWS_DEFENSIVE_PERIOD)
+
+        closeness = 1.0 - distance / CIWS_MISSILE_RANGE
+        intercept_chance = 0.38 + 0.34 * closeness
+        if self.rng.random() < intercept_chance and self.effects.intercept_missile(missile):
+            self.stats.intercept(
+                unit.kind,
+                unit.team,
+                f"CIWS contra {missile.spec.weapon_name}",
+            )
 
     def _apply_blast(self, shooter: Unit, position: Point3, spec) -> None:
         """Damage every enemy inside a strategic warhead's blast radius.
@@ -961,6 +1021,7 @@ class Battle:
             distance = (target.position - unit.position).length()
             if distance <= 82.0:
                 unit.cooldown = 0.16 * self.rng.uniform(0.85, 1.15)
+                unit.ciws_cooldown = max(unit.ciws_cooldown, unit.cooldown)
                 muzzle = unit.naval_ciws_muzzle()
                 spread = 2.0 + distance * 0.025
                 aim = target.position + Vec3(
@@ -994,8 +1055,13 @@ class Battle:
                 return
             if target.kind in FLYING:
                 unit.cooldown = NAVAL_AA_FIRE_PERIOD * self.rng.uniform(0.90, 1.10)
-            self.effects.launch_missile(unit, target, NAVAL_STRIKE)
-            self.stats.missile(unit.kind, unit.team, "misil naval")
+            missile_spec = (
+                NAVAL_LAND_ATTACK
+                if getattr(target, "kind", None) == "building"
+                else NAVAL_STRIKE
+            )
+            self.effects.launch_missile(unit, target, missile_spec)
+            self.stats.missile(unit.kind, unit.team, missile_spec.weapon_name)
             return
 
         if unit.kind == "submarine":

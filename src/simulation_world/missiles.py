@@ -112,6 +112,26 @@ NAVAL_STRIKE = MissileSpec(
     damage=135.0,
 )
 
+# Ship-to-land round for fixed urban structures. Unlike the multipurpose naval
+# missile it climbs above the coast before its terminal dive, so terrain
+# between the sea lane and the city does not make the weapon unusable.
+NAVAL_LAND_ATTACK = MissileSpec(
+    weapon_name="misil naval tierra",
+    launch_speed=48.0,
+    burn_speed=245.0,
+    burn_time=2.0,
+    nav_constant=3.5,
+    max_lateral_g=7.0,
+    seeker_cos=-0.15,
+    proximity=7.5,
+    lifetime=32.0,
+    damage=145.0,
+    trail_rate=27.0,
+    blast_radius=16.0,
+    explosion_scale=3.6,
+    loft_altitude=105.0,
+)
+
 # Submarine strategic salvo. Its guidance has no tactical range gate: the
 # long lifetime and lofted mid-course arc let it reach any active combat unit
 # in the streamed world, including targets hidden behind mountain ranges.

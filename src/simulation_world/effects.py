@@ -287,6 +287,16 @@ class Effects:
         self.missiles.append(missile)
         self.muzzle_flash(start, scale=1.1)
 
+    def intercept_missile(self, missile: Missile) -> bool:
+        """Remove an airborne missile destroyed by a close-in defence burst."""
+        if missile not in self.missiles:
+            return False
+        self.missiles.remove(missile)
+        position = Point3(missile.position)
+        missile.np.remove_node()
+        self.explosion(position, scale=0.72, debris_count=0)
+        return True
+
     # ------------------------------------------------------------------
     # Per-frame update
     # ------------------------------------------------------------------

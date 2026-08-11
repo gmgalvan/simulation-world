@@ -43,6 +43,7 @@ class BattleStats:
         self.weapon_kills: collections.Counter = collections.Counter()
         self.salvos: collections.Counter = collections.Counter()
         self.missiles: collections.Counter = collections.Counter()
+        self.intercepts: collections.Counter = collections.Counter()
         self.deployed: collections.Counter = collections.Counter()
         self.city: dict | None = None
         self.elapsed = 0.0
@@ -63,6 +64,10 @@ class BattleStats:
 
     def salvo(self, kind: str, team: int, count: int) -> None:
         self.salvos[(team, kind)] += count
+
+    def intercept(self, kind: str, team: int, weapon: str) -> None:
+        """An incoming guided weapon was destroyed before reaching its target."""
+        self.intercepts[(team, kind, weapon)] += 1
 
     def hit(self, shooter_kind: str, target_kind: str, team: int, amount: float) -> None:
         self.hits[(shooter_kind, target_kind)] += 1
@@ -175,6 +180,12 @@ class BattleStats:
             for weapon, count in by_weapon.most_common():
                 add(f"  {weapon:22}{count:>12}")
             add("")
+        if self.intercepts:
+            add(f"  {'intercepciones CIWS':22}{'destruidos':>12}")
+            for (team, kind, weapon), count in sorted(self.intercepts.items()):
+                description = f"{TEAM_LABELS[team]} {KIND_LABELS.get(kind, kind)} / {weapon}"
+                add(f"  {description:40}{count:>8}")
+            add("")
         if self.salvos:
             total = sum(self.salvos.values())
             add(f"  salvas estrategicas de submarino: {total} misiles de crucero")
@@ -271,6 +282,15 @@ class BattleStats:
                     "launched": count,
                 }
                 for (team, kind, weapon), count in sorted(self.missiles.items())
+            ],
+            "missile_intercepts": [
+                {
+                    "team": TEAM_LABELS[team],
+                    "unit": kind,
+                    "system": weapon,
+                    "destroyed": count,
+                }
+                for (team, kind, weapon), count in sorted(self.intercepts.items())
             ],
             "strategic_salvos": [
                 {

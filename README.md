@@ -258,6 +258,20 @@ tierra. Contra aeronaves, el lanzamiento naval tiene un ciclo nominal de 8 s
 superficie conservan sus propias cadencias. También posee sonar y puede atacar
 submarinos.
 
+Cuando empieza la fase urbana, los destructores atacantes se concentran en
+**edificios** en lugar de perseguir peatones o coches. Lanzan un misil naval de
+ataque terrestre con ascenso vertical, arco de 105 m y picado terminal, por lo
+que una elevación entre la costa y la ciudad no exige línea de visión directa.
+La cabeza causa 145 de daño, tiene 16 m de radio explosivo y una detonación
+visual mayor que la del misil naval multipropósito.
+
+El **CIWS también protege al propio destructor de misiles entrantes**. Vigila
+los proyectiles guiados enemigos que lo tienen como blanco y abre fuego dentro
+de 135 m en ráfagas de 0.18 s. Cada ráfaga tiene entre 38% y 72% de probabilidad
+de destruir el misil según la cercanía; la intercepción produce trazadoras y
+una detonación pequeña en vuelo. No puede detener torpedos bajo el agua. Las
+intercepciones quedan registradas tanto en el informe TXT como en el JSON.
+
 El **submarino** navega sumergido —91% del tiempo en las mediciones— y lleva
 solo dos sistemas ofensivos: torpedos contra barcos y submarinos, y una salva
 estratégica de hasta tres misiles contra objetivos lejanos. La primera salva se
