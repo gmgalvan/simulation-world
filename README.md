@@ -46,9 +46,15 @@ plana por cuadrilátero, así que el resultado no se sale del estilo facetado.
 
 Con eso están hechos el caza (silueta de **F-35**: morro con chines, canopy,
 tomas laterales, colas inclinadas), el tanque (**Leopard 2**: glacis inclinado,
-torre en cuña, cañón de 120 mm con manguito térmico, faldones) y el helicóptero
+torre en cuña, cañón de 120 mm con manguito térmico, faldones), el helicóptero
 (**Mi-24**: doble burbuja en tándem, alas cortas con anhedro y pilones, torreta
-bajo el morro, rotor de cinco palas).
+bajo el morro, rotor de cinco palas) y el convertiplano (**V-22**: morro caído,
+ala alta, góndolas de punta de ala con rotores tripala y cola en H con derivas
+inclinadas).
+
+Un detalle que muerde dos veces: una pala hecha con una caja centrada cuenta
+como **dos** palas, así que un rotor tripala sale con seis. Las palas van
+desplazadas a un lado y repartidas en 360°.
 
 **Vegetación.** Bosque low-poly generado por chunk, sembrado desde una semilla
 derivada de las coordenadas del chunk: un trozo de mundo **vuelve a crecer
@@ -156,6 +162,12 @@ Medido contra un caza en viraje sostenido, con el mismo presupuesto de maniobra:
 | 11 g (el que usa el juego) | 14% | **75%** |
 | 18 g | 83% | 100% |
 
+**Inspector de unidades.** Tecla `I`: la cámara se pega a una unidad concreta y
+gira despacio a su alrededor para verla en detalle, con el encuadre ajustado al
+tamaño de cada modelo — un fusilero y un caza llenan el plano por igual. `TAB` y
+`SHIFT+TAB` recorren **todas** las unidades del campo, de cualquier bando,
+incluidos los pecios. El marcador dice qué estás mirando y con cuánta vida.
+
 **Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
 zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
 coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
@@ -210,6 +222,8 @@ uv run main.py
 
 | Tecla | Acción |
 |---|---|
+| `I` | **Inspeccionar una unidad de cerca** (entrar/salir) |
+| `TAB` / `SHIFT+TAB` | Unidad siguiente / anterior mientras inspeccionas |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |

@@ -537,46 +537,149 @@ def build_placeholder_tank(color) -> NodePath:
     return root
 
 
-def build_placeholder_osprey(color) -> NodePath:
-    """A blocky stand-in tiltrotor, nose pointing along +Y.
+def _pod_ring(z: float, half_x: float, half_y: float, cy: float = 0.0, sides: int = 8):
+    """Elliptical section in the XY plane at height `z`.
 
-    The two wingtip nacelles are separate named nodes so the animation layer
-    can swing them between hover and airplane mode.
+    For anything whose long axis runs vertically — the tilting nacelles are
+    built upright and then pitched forward, so their sections stack in Z.
+    """
+    return [
+        (
+            math.cos(i * math.tau / sides) * half_x,
+            cy + math.sin(i * math.tau / sides) * half_y,
+            z,
+        )
+        for i in range(sides)
+    ]
+
+
+def build_placeholder_osprey(color) -> NodePath:
+    """A V-22 shaped tiltrotor, nose along +Y.
+
+    Modelled from sections like the rest: the deep fuselage with its drooping
+    nose, the shoulder wing, the outsized wingtip nacelles and the canted
+    H-tail are what make it read as an Osprey rather than a generic transport.
+    The nacelles stay named nodes so the flight code can still swing them.
     """
     root = NodePath("osprey_placeholder")
-    dark = (0.16, 0.17, 0.2, 1.0)
-    grey = (0.42, 0.44, 0.46, 1.0)
+    dark = (0.14, 0.15, 0.17, 1.0)
+    glass = (0.21, 0.31, 0.37, 1.0)
+    grey = (0.44, 0.45, 0.47, 1.0)
+    panel = _shade(color, 0.9)
 
-    make_box((2.5, 7.8, 2.2), color, (0, 0, 0)).reparent_to(root)
-    make_box((2.0, 1.9, 1.6), _shade(color, 1.2), (0, 4.3, 0.2)).reparent_to(root)
-    make_box((2.2, 1.7, 1.9), _shade(color, 0.8), (0, -4.2, 0.15)).reparent_to(root)
-    make_box((1.6, 1.4, 0.45), dark, (0, -4.8, -0.8)).reparent_to(root)  # rear ramp
+    # Fuselage: blunt drooping nose, deep cabin, ramp cut away at the back.
+    make_loft(
+        [
+            _round_ring(7.90, 0.42, 0.38, -0.55),
+            _round_ring(7.10, 0.78, 0.70, -0.40),
+            _round_ring(5.70, 1.06, 1.00, -0.16),
+            _round_ring(3.90, 1.24, 1.22, 0.02),
+            _round_ring(1.60, 1.34, 1.34, 0.06),
+            _round_ring(-1.60, 1.34, 1.34, 0.06),
+            _round_ring(-4.40, 1.26, 1.28, 0.14),
+            _round_ring(-6.40, 1.06, 1.10, 0.42),
+            _round_ring(-7.90, 0.80, 0.82, 0.86),
+        ],
+        color,
+    ).reparent_to(root)
 
-    # Shoulder wing carrying both nacelles.
-    make_box((11.0, 2.0, 0.5), _shade(color, 0.9), (0, -0.4, 1.45)).reparent_to(root)
+    # Stepped flight deck glazing.
+    make_loft(
+        [
+            _round_ring(7.05, 0.60, 0.34, 0.42),
+            _round_ring(6.10, 0.92, 0.52, 0.62),
+            _round_ring(4.60, 0.98, 0.54, 0.72),
+            _round_ring(3.90, 0.80, 0.42, 0.66),
+        ],
+        glass,
+    ).reparent_to(root)
 
-    # Twin tail, the giveaway silhouette of the real aircraft.
-    make_box((4.8, 0.8, 0.4), _shade(color, 0.85), (0, -4.9, 1.3)).reparent_to(root)
+    # Rear ramp, dropped open under the tail cone.
+    make_box((1.9, 2.2, 0.16), panel, (0, -7.0, -0.62)).reparent_to(root)
+
+    # Sponsons: the fat fairings along the belly that hold the gear.
     for side in (-1, 1):
-        make_box((0.35, 1.5, 2.5), _shade(color, 0.85), (side * 2.3, -4.9, 2.5)).reparent_to(root)
+        sponson = make_loft(
+            [
+                _round_ring(3.10, 0.34, 0.42, -0.62),
+                _round_ring(0.60, 0.52, 0.58, -0.72),
+                _round_ring(-2.60, 0.44, 0.50, -0.66),
+            ],
+            panel,
+        )
+        sponson.set_x(side * 1.28)
+        sponson.reparent_to(root)
 
+    # Shoulder wing, slightly swept forward, carrying both nacelles.
     for side in (-1, 1):
-        make_box((0.8, 2.9, 0.85), _shade(color, 0.8), (side * 1.55, -0.6, -0.8)).reparent_to(root)
+        wing = make_loft(
+            [
+                _airfoil_ring(side * 1.20, 1.55, -1.65, 0.62),
+                _airfoil_ring(side * 4.20, 1.70, -1.45, 0.50),
+                _airfoil_ring(side * 6.30, 1.80, -1.30, 0.40),
+            ],
+            panel,
+        )
+        wing.set_pos(0, -0.20, 1.42)
+        wing.reparent_to(root)
 
+    # H-tail: horizontal stabiliser with the fins canted out at its tips.
+    tailplane = make_loft(
+        [
+            _airfoil_ring(-3.30, -5.90, -7.70, 0.34),
+            _airfoil_ring(0.00, -6.10, -7.90, 0.42),
+            _airfoil_ring(3.30, -5.90, -7.70, 0.34),
+        ],
+        panel,
+    )
+    tailplane.set_z(1.15)
+    tailplane.reparent_to(root)
+    for side in (-1, 1):
+        fin = make_loft(
+            [
+                _airfoil_ring(0.00, -5.70, -7.90, 0.40),
+                _airfoil_ring(2.60, -6.55, -7.85, 0.20),
+            ],
+            panel,
+        )
+        fin.set_pos(side * 3.25, 0, 1.30)
+        fin.set_r(side * -74.0)
+        fin.reparent_to(root)
+
+    # Nacelles: built upright so the flight code can pitch them forward.
+    for side in (-1, 1):
         nacelle = NodePath(f"Nacelle{'Left' if side < 0 else 'Right'}")
-        nacelle.set_pos(side * 5.35, -0.4, 1.65)
+        nacelle.set_pos(side * 6.55, -0.20, 1.55)
         nacelle.reparent_to(root)
 
-        # Nacelle body points +Z when upright, so tilting it pitches thrust forward.
-        make_box((1.45, 1.7, 2.9), grey, (0, 0, 0.5)).reparent_to(nacelle)
-        make_box((1.1, 1.25, 0.7), dark, (0, 0, 2.1)).reparent_to(nacelle)
+        make_loft(
+            [
+                _pod_ring(-1.55, 0.62, 0.98, -0.10),
+                _pod_ring(-0.40, 0.86, 1.30, 0.00),
+                _pod_ring(1.30, 0.88, 1.28, 0.05),
+                _pod_ring(2.45, 0.66, 0.86, 0.10),
+                _pod_ring(2.95, 0.40, 0.48, 0.10),
+            ],
+            grey,
+        ).reparent_to(nacelle)
+        # Exhaust under the pod and the spinner on top.
+        make_loft(
+            [_pod_ring(-1.55, 0.50, 0.78, -0.10), _pod_ring(-2.05, 0.34, 0.54, -0.14)],
+            dark,
+        ).reparent_to(nacelle)
+        make_loft(
+            [_pod_ring(2.95, 0.34, 0.34), _pod_ring(3.35, 0.16, 0.16)],
+            dark,
+        ).reparent_to(nacelle)
 
         proprotor = NodePath("Proprotor")
-        proprotor.set_pos(0, 0, 2.45)
+        proprotor.set_pos(0, 0, 3.05)
         proprotor.reparent_to(nacelle)
-        for angle in (0, 60, 120):
-            blade = make_box((0.38, 9.0, 0.11), dark)
-            blade.set_h(angle)
+        # Single-ended blades at 120 degrees: a symmetric box counts twice and
+        # a three-blade rotor comes out with six.
+        for i in range(3):
+            blade = make_box((0.44, 5.60, 0.13), dark, (0, 2.85, 0))
+            blade.set_h(i * 120.0)
             blade.reparent_to(proprotor)
 
     return root

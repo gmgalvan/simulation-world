@@ -30,6 +30,16 @@ from .terrain import WATER_COLOR, InfiniteTerrain
 SKY_COLOR = Vec4(0.52, 0.68, 0.86, 1.0)
 PHYSICS_STEP = 1.0 / 120.0
 CAMERA_MODES = ("orbit", "chase", "high", "free")
+# Short labels for the inspector, so the HUD names what you are looking at.
+KIND_LABELS = {
+    "jet": "caza F-35",
+    "helicopter": "helicoptero Mi-24",
+    "osprey": "convertiplano V-22",
+    "tank": "tanque Leopard 2",
+    "sam": "bateria antiaerea",
+    "rocket": "equipo de RPG",
+    "rifleman": "fusilero",
+}
 MOVE_KEYS = ("w", "a", "s", "d", "q", "e")
 LOOK_KEYS = ("arrow_left", "arrow_right", "arrow_up", "arrow_down")
 
@@ -63,6 +73,9 @@ class SimulationApp(ShowBase):
         self._last_pointer: tuple[float, float] | None = None
         self.dragging = False
         self._drag_from: tuple[float, float] | None = None
+        self.inspect_unit = None
+        self.inspect_angle = 0.0
+        self.inspect_zoom = 1.0
 
         self.disable_mouse()
         self.set_background_color(SKY_COLOR)
@@ -197,17 +210,32 @@ class SimulationApp(ShowBase):
         )
         self._refresh_help()
 
+    def _inspect_label(self) -> str:
+        unit = self.inspect_unit
+        if unit is None:
+            return ""
+        kind = KIND_LABELS.get(unit.kind, unit.kind)
+        team = TEAM_NAMES[unit.team]
+        if not unit.alive:
+            return f"{kind} ({team}) — destruido"
+        return f"{kind} ({team}) — vida {unit.hp_frac * 100:.0f}%"
+
     def _refresh_help(self) -> None:
         if self.camera_mode == "free":
             text = (
                 "LIBRE: WASD mover   Q/E bajar-subir   ARRASTRA raton para mirar   "
                 "RUEDA avanzar   SHIFT rapido   [C] camara   [R] batalla   [ESC] salir"
             )
+        elif self.camera_mode == "inspect":
+            text = (
+                "INSPECCION: [TAB] siguiente unidad   [SHIFT+TAB] anterior   "
+                "ARRASTRA girar   RUEDA acercar   [I] salir"
+            )
         else:
             text = (
                 f"{self.camera_mode.upper()}: ARRASTRA raton para girar   RUEDA zoom   "
-                "[C] camara   [R] nueva batalla   [ESPACIO] pausa   "
-                "[F] fisica   [ESC] salir"
+                "[I] inspeccionar unidad   [C] camara   [R] nueva batalla   "
+                "[ESPACIO] pausa   [ESC] salir"
             )
         self.help_text.setText(text)
 
@@ -231,6 +259,10 @@ class SimulationApp(ShowBase):
         self.accept("mouse3-up", self._release_mouse)
         self.accept("wheel_up", self._zoom, [-1.0])
         self.accept("wheel_down", self._zoom, [1.0])
+        # Inspector: get right up to a single unit and look it over.
+        self.accept("i", self.toggle_inspect)
+        self.accept("tab", self.cycle_inspect, [1])
+        self.accept("shift-tab", self.cycle_inspect, [-1])
         # Held keys rather than key repeat: repeat rates are jerky and differ
         # between systems, which makes camera movement feel broken.
         for key in (*MOVE_KEYS, *LOOK_KEYS, "shift", "-", "=", "+"):
@@ -266,12 +298,83 @@ class SimulationApp(ShowBase):
         self._start_battle(self.args.seed + int(self.sim_time * 1000) + 1)
 
     def cycle_camera(self) -> None:
-        index = CAMERA_MODES.index(self.camera_mode)
-        self.camera_mode = CAMERA_MODES[(index + 1) % len(CAMERA_MODES)]
+        if self.camera_mode in CAMERA_MODES:
+            index = CAMERA_MODES.index(self.camera_mode)
+            self.camera_mode = CAMERA_MODES[(index + 1) % len(CAMERA_MODES)]
+        else:
+            # The inspector is not part of the rotation, so cycling out of it
+            # rejoins at the start rather than looking itself up and failing.
+            self.camera_mode = CAMERA_MODES[0]
+        self.inspect_unit = None
         self.chase_index += 1
         if self.camera_mode != "free" and self.mouse_look:
             self.toggle_mouse_look()
         self._refresh_help()
+
+    # ------------------------------------------------------------------
+    # Unit inspector
+    # ------------------------------------------------------------------
+    def _inspectable(self):
+        """Units that still have a model in the scene, wrecks included."""
+        if self.battle is None:
+            return []
+        return [u for u in self.battle.units if not u.np.is_empty()]
+
+    def toggle_inspect(self) -> None:
+        if self.camera_mode == "inspect":
+            self.camera_mode = "orbit"
+            self.inspect_unit = None
+        else:
+            self.camera_mode = "inspect"
+            self.inspect_angle = 35.0
+            self.inspect_zoom = 1.0
+            if self.inspect_unit is None:
+                units = self._inspectable()
+                self.inspect_unit = units[0] if units else None
+        self._refresh_help()
+
+    def cycle_inspect(self, step: int) -> None:
+        """Step through every unit on the field, either team."""
+        units = self._inspectable()
+        if not units:
+            self.inspect_unit = None
+            return
+        if self.camera_mode != "inspect":
+            self.camera_mode = "inspect"
+            self.inspect_angle = 35.0
+        try:
+            index = units.index(self.inspect_unit)
+        except ValueError:
+            index = -1 if step > 0 else 0
+        self.inspect_unit = units[(index + step) % len(units)]
+        self._refresh_help()
+
+    def _update_inspect_camera(self, dt: float) -> None:
+        units = self._inspectable()
+        if self.inspect_unit not in units:
+            self.inspect_unit = units[0] if units else None
+        if self.inspect_unit is None:
+            # Nothing left to look at; hand the camera back to the battle.
+            self.camera_mode = "orbit"
+            self._refresh_help()
+            return
+
+        unit = self.inspect_unit
+        focus = Point3(unit.position)
+        # Frame the unit by its own size, so a soldier and a jet both fill it.
+        span = unit.spec.model_length
+        radius = max(4.0, span * 1.15) * self.inspect_zoom
+
+        self.inspect_angle += dt * 16.0
+        angle = math.radians(self.inspect_angle)
+        position = Point3(
+            focus.x + math.cos(angle) * radius,
+            focus.y + math.sin(angle) * radius,
+            focus.z + radius * 0.42,
+        )
+        position.z = max(position.z, self._ground_clearance(position.x, position.y) + 1.5)
+        self.camera.set_pos(position)
+        self.camera.look_at(focus)
 
     def _grab_mouse(self) -> None:
         self.dragging = True
@@ -282,6 +385,9 @@ class SimulationApp(ShowBase):
         self._drag_from = None
 
     def _zoom(self, direction: float) -> None:
+        if self.camera_mode == "inspect":
+            self.inspect_zoom = min(3.0, max(0.35, self.inspect_zoom + direction * 0.12))
+            return
         if self.camera_mode == "free":
             # Dolly along the view axis.
             forward = self.camera.get_quat().get_forward()
@@ -291,7 +397,14 @@ class SimulationApp(ShowBase):
 
     def _apply_mouse_drag(self) -> None:
         """Drag with a mouse button held to swing the camera around."""
-        if not self.dragging or self.mouse_look or not self.mouseWatcherNode.has_mouse():
+        # mouseWatcherNode is absent when running without a window, so guard it
+        # rather than relying on `dragging` never being set in that case.
+        if (
+            not self.dragging
+            or self.mouse_look
+            or self.mouseWatcherNode is None
+            or not self.mouseWatcherNode.has_mouse()
+        ):
             self._drag_from = None
             return
 
@@ -303,6 +416,9 @@ class SimulationApp(ShowBase):
             if self.camera_mode == "free":
                 self.camera.set_h(self.camera.get_h() - dx * 110.0)
                 self.camera.set_p(max(-88.0, min(88.0, self.camera.get_p() + dy * 110.0)))
+            elif self.camera_mode == "inspect":
+                self.inspect_angle -= dx * 220.0
+                self.inspect_zoom = min(3.0, max(0.35, self.inspect_zoom - dy * 1.2))
             else:
                 self.orbit_angle -= dx * 200.0
                 self.orbit_height = min(1.4, max(0.12, self.orbit_height + dy * 1.3))
@@ -370,7 +486,10 @@ class SimulationApp(ShowBase):
         self._follow_world()
 
         suffix = "   ·   PAUSA" if self.paused else ""
-        self.status_text.setText(self.battle.status_text() + suffix)
+        if self.camera_mode == "inspect" and self.inspect_unit is not None:
+            self.status_text.setText(self._inspect_label() + suffix)
+        else:
+            self.status_text.setText(self.battle.status_text() + suffix)
         self._update_roster()
         return task.cont
 
@@ -395,6 +514,9 @@ class SimulationApp(ShowBase):
         self._apply_mouse_drag()
         if self.camera_mode == "free":
             self._update_free_camera(dt)
+            return
+        if self.camera_mode == "inspect":
+            self._update_inspect_camera(dt)
             return
 
         # focus_point() jumps whenever the closest enemy pair changes; ease
@@ -483,7 +605,7 @@ class SimulationApp(ShowBase):
         if "arrow_down" in self.keys:
             pitch -= look
 
-        if self.mouse_look and self.mouseWatcherNode.has_mouse():
+        if self.mouse_look and self.mouseWatcherNode is not None and self.mouseWatcherNode.has_mouse():
             pointer = self.win.get_pointer(0)
             current = (pointer.get_x(), pointer.get_y())
             if self._last_pointer is not None:
