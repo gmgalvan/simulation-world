@@ -175,6 +175,14 @@ con nada). Van con blending normal, **no aditivo** como las explosiones — la
 sangre no debe brillar. Los vehículos siguen ardiendo y humeando; los cuerpos
 solo quedan tendidos.
 
+Los soldados procedurales están **articulados**: cadera, rodillas, botas y
+torso componen una marcha o carrera cuya cadencia sale de la velocidad real del
+cuerpo. Si frenan para apuntar, trepan despacio o quedan atascados, sus pasos
+también se frenan en vez de patinar sobre el suelo. Uniforme, casco, chaleco,
+mochila y equipo tienen volumen propio; los brazos se resuelven desde hombro a
+codo y de codo al punto exacto de agarre, así que el fusil y el RPG se sostienen
+a dos manos incluso mientras corren.
+
 **Cámara.** Cuatro modos (tecla `C`): órbita, persecución, cenital y **libre**.
 Los automáticos enfocan la **pareja de enemigos más cercana** — el centroide de
 todas las unidades cae en terreno vacío a medio camino entre los dos bandos y

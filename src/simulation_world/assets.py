@@ -199,6 +199,58 @@ def _round_ring(y: float, half_w: float, half_h: float, z: float = 0.0, sides: i
     ]
 
 
+def _tapered_vertical(
+    height: float,
+    top_size: tuple[float, float],
+    bottom_size: tuple[float, float],
+    color,
+) -> NodePath:
+    """A faceted limb/body segment running from its joint down the local Z axis."""
+    tx, ty = top_size
+    bx, by = bottom_size
+    vertices = [
+        (-tx, -ty, 0), (tx, -ty, 0), (tx, ty, 0), (-tx, ty, 0),
+        (-bx, -by, -height), (bx, -by, -height), (bx, by, -height), (-bx, by, -height),
+    ]
+    faces = [
+        (3, 2, 1, 0), (4, 5, 6, 7),
+        (0, 1, 5, 4), (1, 2, 6, 5), (2, 3, 7, 6), (3, 0, 4, 7),
+    ]
+    return make_solid(vertices, faces, color)
+
+
+def _joint(parent: NodePath, name: str, position) -> NodePath:
+    """Create a named animation pivot without adding render geometry."""
+    node = parent.attach_new_node(name)
+    node.set_pos(*position)
+    return node
+
+
+def _limb_between(
+    parent: NodePath,
+    name: str,
+    start,
+    end,
+    top_radius: float,
+    bottom_radius: float,
+    color,
+) -> NodePath:
+    """Build a tapered segment whose endpoints are exact in parent space."""
+    start_v = Vec3(*start)
+    end_v = Vec3(*end)
+    length = (end_v - start_v).length()
+    pivot = _joint(parent, name, start)
+    pivot.look_at(parent, end_v)
+    make_loft(
+        [
+            _round_ring(0.0, top_radius, top_radius, 0.0, 6),
+            _round_ring(length, bottom_radius, bottom_radius, 0.0, 6),
+        ],
+        color,
+    ).reparent_to(pivot)
+    return pivot
+
+
 def build_placeholder_helicopter(color) -> NodePath:
     """A Mi-24 shaped gunship, nose along +Y.
 
@@ -531,41 +583,130 @@ def build_placeholder_osprey(color) -> NodePath:
 
 
 def build_placeholder_soldier(color, launcher: bool = False) -> NodePath:
-    """A blocky infantryman facing +Y, holding a rifle or a rocket launcher.
+    """Articulated low-poly infantryman facing +Y.
 
-    Deliberately a bit larger than life: a true-to-scale 1.8 m figure is only
-    a couple of pixels from the battle camera and reads as noise.
+    The named pivots are a tiny procedural skeleton.  They keep the fallback
+    model cheap, but allow the animation layer to produce a real heel-to-toe
+    run instead of sliding a rigid pawn over the terrain.
     """
     root = NodePath("soldier_placeholder")
-    dark = (0.15, 0.16, 0.18, 1.0)
-    gear = _shade(color, 0.55)
-    skin = (0.62, 0.48, 0.36, 1.0)
+    uniform = _shade(color, 0.82)
+    cloth_dark = _shade(color, 0.58)
+    webbing = (0.22, 0.25, 0.18, 1.0)
+    armour = (0.18, 0.21, 0.16, 1.0)
+    metal = (0.10, 0.11, 0.12, 1.0)
+    rubber = (0.07, 0.075, 0.07, 1.0)
+    wood = (0.28, 0.16, 0.08, 1.0)
+    skin = (0.61, 0.43, 0.30, 1.0)
+    skin_shadow = (0.48, 0.32, 0.22, 1.0)
 
-    # Legs, torso, webbing, head, helmet.
+    # Pelvis and articulated legs. Geometry hangs from each joint so rotations
+    # bend at the hip and knee instead of through the middle of a solid block.
+    make_box((0.58, 0.34, 0.30), cloth_dark, (0, 0, -0.15)).reparent_to(root)
+    for side, label in ((-1, "Left"), (1, "Right")):
+        hip = _joint(root, f"{label}Hip", (side * 0.18, 0, -0.20))
+        _tapered_vertical(0.48, (0.145, 0.16), (0.125, 0.13), uniform).reparent_to(hip)
+        # Cargo pocket and a hard kneepad break up the trouser silhouette.
+        make_box((0.25, 0.08, 0.20), cloth_dark, (0, 0.15, -0.25)).reparent_to(hip)
+        knee = _joint(hip, f"{label}Knee", (0, 0, -0.48))
+        make_box((0.24, 0.10, 0.16), armour, (0, 0.13, -0.04)).reparent_to(knee)
+        _tapered_vertical(0.46, (0.12, 0.13), (0.095, 0.105), cloth_dark).reparent_to(knee)
+        boot = _joint(knee, f"{label}Boot", (0, 0, -0.46))
+        make_box((0.24, 0.42, 0.17), rubber, (0, 0.09, -0.05)).reparent_to(boot)
+
+    upper = _joint(root, "UpperBody", (0, 0, 0))
+    # Tapered shoulders and waist give a human outline from every camera angle.
+    torso = _tapered_vertical(0.72, (0.38, 0.22), (0.27, 0.17), uniform)
+    torso.set_z(0.60)
+    torso.reparent_to(upper)
+    make_box((0.66, 0.12, 0.48), armour, (0, 0.22, 0.30)).reparent_to(upper)
+    make_box((0.60, 0.10, 0.38), webbing, (0, -0.23, 0.28)).reparent_to(upper)
+    # Magazine/utility pouches along the vest.
+    for x in (-0.21, 0.0, 0.21):
+        make_box((0.17, 0.12, 0.23), webbing, (x, 0.29, 0.12)).reparent_to(upper)
+    make_box((0.10, 0.48, 0.10), webbing, (0, 0, 0.43)).reparent_to(upper)
+
+    # Neck, faceted head, ears, nose and a helmet with a slight front brim.
+    make_box((0.18, 0.18, 0.14), skin_shadow, (0, 0, 0.68)).reparent_to(upper)
+    make_loft(
+        [
+            _round_ring(-0.14, 0.14, 0.19, 0.88, 8),
+            _round_ring(0.14, 0.14, 0.19, 0.88, 8),
+        ],
+        skin,
+    ).reparent_to(upper)
+    make_box((0.055, 0.08, 0.08), skin_shadow, (0, 0.19, 0.88)).reparent_to(upper)
     for side in (-1, 1):
-        make_box((0.26, 0.28, 0.95), gear, (side * 0.17, 0, -0.72)).reparent_to(root)
-        make_box((0.28, 0.42, 0.16), dark, (side * 0.17, 0.06, -1.18)).reparent_to(root)
-    make_box((0.66, 0.40, 0.95), color, (0, 0, 0.28)).reparent_to(root)
-    make_box((0.70, 0.46, 0.30), gear, (0, 0, 0.10)).reparent_to(root)
-    make_box((0.30, 0.30, 0.30), skin, (0, 0, 0.90)).reparent_to(root)
-    make_box((0.40, 0.42, 0.16), gear, (0, 0, 1.03)).reparent_to(root)
+        make_box((0.035, 0.08, 0.10), skin_shadow, (side * 0.155, 0, 0.88)).reparent_to(upper)
+    make_loft(
+        [
+            _round_ring(-0.16, 0.18, 0.10, 1.02, 8),
+            _round_ring(0.13, 0.20, 0.12, 1.01, 8),
+        ],
+        armour,
+    ).reparent_to(upper)
+    make_box((0.42, 0.15, 0.055), armour, (0, 0.12, 1.00)).reparent_to(upper)
 
+    # Arms are solved from explicit shoulder -> elbow -> grip points. This is
+    # more deliberate than rotating two dangling sticks: both wrists now end
+    # exactly on their grip, and the stock sits outside the chest.
     if launcher:
-        # Backpack of spare rounds marks the anti-tank team at a glance.
-        make_box((0.44, 0.26, 0.60), _shade(color, 0.7), (0, -0.32, 0.30)).reparent_to(root)
-        make_box((0.26, 0.26, 0.16), dark, (0, 0, 0.62)).reparent_to(root)
-        # Tube over the shoulder, warhead at the front.
-        make_box((0.20, 1.85, 0.20), dark, (0.16, 0.55, 0.62)).reparent_to(root)
-        make_box((0.30, 0.42, 0.30), (0.35, 0.30, 0.16, 1.0), (0.16, 1.42, 0.62)).reparent_to(root)
-        make_box((0.16, 0.26, 0.26), dark, (0.16, -0.18, 0.56)).reparent_to(root)
+        arm_points = {
+            "Left": ((-0.40, 0.00, 0.55), (-0.42, 0.38, 0.34), (0.02, 0.79, 0.73)),
+            "Right": ((0.40, 0.00, 0.55), (0.47, 0.28, 0.31), (0.26, 0.34, 0.52)),
+        }
+        weapon_pos = (0.16, 0.12, 0.64)
     else:
-        make_box((0.16, 0.95, 0.14), dark, (0.16, 0.42, 0.34)).reparent_to(root)
-        make_box((0.13, 0.30, 0.26), dark, (0.16, 0.10, 0.20)).reparent_to(root)  # magazine
-        make_box((0.12, 0.26, 0.20), _shade(dark, 1.6), (0.16, -0.18, 0.30)).reparent_to(root)
+        arm_points = {
+            "Left": ((-0.40, 0.00, 0.55), (-0.43, 0.35, 0.31), (0.10, 0.72, 0.56)),
+            "Right": ((0.40, 0.00, 0.55), (0.48, 0.25, 0.29), (0.28, 0.31, 0.35)),
+        }
+        weapon_pos = (0.25, 0.14, 0.50)
 
-    # Arms last so they read on top of the weapon.
-    for side in (-1, 1):
-        make_box((0.20, 0.22, 0.72), color, (side * 0.42, 0.10, 0.34)).reparent_to(root)
+    for label, (shoulder_pos, elbow_pos, hand_pos) in arm_points.items():
+        _limb_between(
+            upper, f"{label}Shoulder", shoulder_pos, elbow_pos, 0.115, 0.09, uniform
+        )
+        _limb_between(
+            upper, f"{label}Elbow", elbow_pos, hand_pos, 0.088, 0.065, cloth_dark
+        )
+        make_box((0.15, 0.17, 0.15), skin, hand_pos).reparent_to(upper)
+
+    weapon = _joint(upper, "Weapon", weapon_pos)
+    if launcher:
+        # RPG-style launcher: long olive tube, flared venturi, optical sight,
+        # grips and the distinctive bulbous warhead ahead of the shoulder.
+        tube = (0.24, 0.27, 0.15, 1.0)
+        make_box((0.15, 1.72, 0.15), tube, (0, 0.54, 0.10)).reparent_to(weapon)
+        make_box((0.24, 0.26, 0.24), metal, (0, -0.33, 0.10)).reparent_to(weapon)
+        make_box((0.11, 0.23, 0.30), rubber, (0, 0.26, -0.10)).reparent_to(weapon)
+        make_box((0.08, 0.19, 0.14), metal, (-0.12, 0.45, 0.25)).reparent_to(weapon)
+        make_loft(
+            [
+                _round_ring(1.35, 0.035, 0.035, 0.10, 8),
+                _round_ring(1.48, 0.16, 0.16, 0.10, 8),
+                _round_ring(1.76, 0.10, 0.10, 0.10, 8),
+            ],
+            (0.30, 0.31, 0.16, 1.0),
+        ).reparent_to(weapon)
+        # Pack and a spare round make the anti-armour role legible at distance.
+        make_box((0.48, 0.25, 0.58), webbing, (0, -0.33, 0.24)).reparent_to(upper)
+        make_box((0.11, 0.16, 0.68), tube, (-0.23, -0.42, 0.25)).reparent_to(upper)
+    else:
+        # AK-inspired silhouette: stock, receiver, handguard, gas tube, sights,
+        # barrel, muzzle brake and a visibly curved two-piece magazine.
+        make_box((0.16, 0.43, 0.16), wood, (0, -0.18, 0.02)).reparent_to(weapon)
+        make_box((0.18, 0.36, 0.18), metal, (0, 0.20, 0.05)).reparent_to(weapon)
+        make_box((0.15, 0.38, 0.14), wood, (0, 0.55, 0.05)).reparent_to(weapon)
+        make_box((0.07, 0.72, 0.07), metal, (0, 0.83, 0.08)).reparent_to(weapon)
+        make_box((0.09, 0.17, 0.09), metal, (0, 1.20, 0.08)).reparent_to(weapon)
+        make_box((0.035, 0.035, 0.12), metal, (0, 1.02, 0.17)).reparent_to(weapon)
+        make_box((0.11, 0.10, 0.27), rubber, (0, 0.15, -0.17)).reparent_to(weapon)
+        mag = make_box((0.13, 0.14, 0.31), metal, (0, 0, -0.12))
+        mag.set_p(-15)
+        mag.set_pos(0, 0.34, -0.12)
+        mag.reparent_to(weapon)
+        make_box((0.05, 0.09, 0.06), metal, (0, 0.28, 0.19)).reparent_to(weapon)
 
     return root
 

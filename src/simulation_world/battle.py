@@ -318,6 +318,17 @@ class Battle:
         ]
         unit.nacelles = [n for n in unit.nacelles if not n.is_empty()]
         unit.proprotors = [n.find("**/Proprotor") for n in unit.nacelles]
+        # Optional procedural infantry skeleton. Real imported models are
+        # allowed to omit it; empty NodePaths simply disable this animation.
+        unit.left_hip = model.find("**/LeftHip")
+        unit.right_hip = model.find("**/RightHip")
+        unit.left_knee = model.find("**/LeftKnee")
+        unit.right_knee = model.find("**/RightKnee")
+        unit.left_boot = model.find("**/LeftBoot")
+        unit.right_boot = model.find("**/RightBoot")
+        unit.left_shoulder = model.find("**/LeftShoulder")
+        unit.right_shoulder = model.find("**/RightShoulder")
+        unit.upper_body = model.find("**/UpperBody")
         # Cap the stagger: with a 5 s reload the launcher teams were spending
         # the whole opening exchange idle and dying before their first shot.
         unit.cooldown = self.rng.uniform(0.0, min(spec.fire_period, 1.2))
@@ -562,11 +573,63 @@ class Battle:
         unit.model_np.set_p(unit.model_np.get_p() + (target_pitch - unit.model_np.get_p()) * blend)
         unit.model_np.set_r(unit.model_np.get_r() + (target_roll - unit.model_np.get_r()) * blend)
 
+        if unit.kind in INFANTRY:
+            self._animate_infantry(unit, dt)
+            return
+
         if not unit.turret.is_empty() and unit.target is not None:
             # Turret tracks the target independently of the hull.
             unit.turret.look_at(self.render, unit.target.position)
             unit.turret.set_p(0)
             unit.turret.set_r(0)
+
+    @staticmethod
+    def _animate_infantry(unit: Unit, dt: float) -> None:
+        """Velocity-driven walk/run cycle for the procedural soldier skeleton."""
+        if unit.left_hip.is_empty() or unit.right_hip.is_empty():
+            return
+
+        velocity = unit.velocity
+        speed = math.hypot(velocity.x, velocity.y)
+        moving = max(0.0, min(1.0, (speed - 0.18) / 1.4))
+        blend_rate = min(1.0, dt * (9.0 if moving > unit.gait_blend else 12.0))
+        unit.gait_blend += (moving - unit.gait_blend) * blend_rate
+
+        speed_ratio = max(0.0, min(1.25, speed / unit.spec.cruise_speed))
+        # Roughly 1.7 steps/m while walking, opening into a longer running
+        # stride at speed. Phase is in radians and therefore frame-rate safe.
+        cadence = 5.2 + speed_ratio * 6.4
+        unit.gait_phase = (unit.gait_phase + cadence * dt * unit.gait_blend) % math.tau
+        cycle = math.sin(unit.gait_phase)
+        opposite = -cycle
+        contact = math.cos(unit.gait_phase)
+        stride = (21.0 + 25.0 * speed_ratio) * unit.gait_blend
+
+        unit.left_hip.set_p(cycle * stride)
+        unit.right_hip.set_p(opposite * stride)
+
+        # The trailing leg folds at the knee while the planted leg straightens.
+        knee_bend = (24.0 + 30.0 * speed_ratio) * unit.gait_blend
+        if not unit.left_knee.is_empty():
+            unit.left_knee.set_p(-max(0.0, -cycle) * knee_bend)
+        if not unit.right_knee.is_empty():
+            unit.right_knee.set_p(-max(0.0, cycle) * knee_bend)
+
+        # Keep boot soles closer to level; this makes foot plants read clearly
+        # even though the figure is deliberately low-poly.
+        if not unit.left_boot.is_empty():
+            unit.left_boot.set_p(-cycle * stride * 0.42)
+        if not unit.right_boot.is_empty():
+            unit.right_boot.set_p(-opposite * stride * 0.42)
+
+        # The arms retain the exact two-handed firing solution built into the
+        # model. Tactical movement is carried by the legs and upper body; a
+        # free arm swing would disconnect the wrists from the weapon grips.
+        if not unit.upper_body.is_empty():
+            bob = abs(contact) * (0.018 + 0.028 * speed_ratio) * unit.gait_blend
+            unit.upper_body.set_z(bob)
+            unit.upper_body.set_p(-speed_ratio * 7.0 * unit.gait_blend)
+            unit.upper_body.set_r(-cycle * 2.8 * unit.gait_blend)
 
     def _fire(self, unit: Unit, target: Unit) -> None:
         unit.cooldown = unit.spec.fire_period * self.rng.uniform(0.85, 1.15)

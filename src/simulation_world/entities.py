@@ -212,6 +212,11 @@ class Unit:
         self.escape_dir = Vec3(0, 1, 0)
         self.climb_grade = 0.0  # slope straight ahead, slows the unit down
         self.target: Unit | None = None
+        # Procedural infantry animation.  The phase advances from actual
+        # horizontal velocity, so steep climbs, firing halts and jams are
+        # visible in the gait instead of feet skating at a fixed rate.
+        self.gait_phase = (self.id * 2.39996) % math.tau
+        self.gait_blend = 0.0
 
         node = BulletRigidBodyNode(f"{kind}-{self.id}")
         node.add_shape(BulletBoxShape(spec.half_extents))
@@ -267,8 +272,8 @@ class Unit:
         offset, height = {
             "helicopter": (3.0, 0.2),
             "osprey": (4.0, -0.4),   # door gun, below the fuselage line
-            "rifleman": (0.9, 0.55),
-            "rocket": (1.1, 0.55),
+            "rifleman": (1.30, 0.56),
+            "rocket": (1.88, 0.72),
             "jet": (6.5, -0.8),   # off the rails, below the wing
             "sam": (1.6, 2.4),    # off the launcher rack on top
         }.get(self.kind, (4.2, 1.1))
