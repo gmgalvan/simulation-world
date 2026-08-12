@@ -277,6 +277,10 @@ class Unit:
         # this unit.  The controller lives outside Unit so input concerns do
         # not leak into the reusable physics/entity layer.
         self.manual_controlled = False
+        # The cannon reloads on its own clock. Sharing `cooldown` with the
+        # missiles meant one launch gagged the gun for the whole 1.6 s rack
+        # cycle, and a burst of cannon fire blocked the next missile.
+        self.gun_cooldown = 0.0
         # Where the close-in mounts are currently trained, and how long that
         # bearing stays valid before they swing back to their parked heading.
         self.ciws_mounts: list = []

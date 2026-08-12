@@ -758,11 +758,11 @@ class HeliHud(_CockpitHud):
             self.weapon_text.setFg((1.0, 0.88, 0.35, 1.0))
             self.reticle.set_color_scale(1.0, 0.90, 0.45, 0.85)
         elif ready:
-            self.weapon_text.setText("CLIC IZQ: LANZAR")
+            self.weapon_text.setText("CLIC IZQ: MISIL   CLIC DER: CANON")
             self.weapon_text.setFg(HUD_GREEN)
             self.reticle.set_color_scale(0.36, 1.0, 0.50, 0.80)
         elif locked and not armed:
-            self.weapon_text.setText("RACKS VACIOS - SOLO CANON")
+            self.weapon_text.setText("RACKS VACIOS - CLIC DER: CANON")
             self.weapon_text.setFg(HUD_AMBER)
             self.reticle.set_color_scale(1.0, 0.78, 0.20, 0.80)
         elif locked:
@@ -770,7 +770,7 @@ class HeliHud(_CockpitHud):
             self.weapon_text.setFg(HUD_AMBER)
             self.reticle.set_color_scale(0.36, 1.0, 0.50, 0.66)
         else:
-            self.weapon_text.setText("BUSCANDO BLANCO")
+            self.weapon_text.setText("SIN BLANCO   CLIC DER: CANON")
             self.weapon_text.setFg(HUD_WHITE)
             self.reticle.set_color_scale(0.36, 1.0, 0.50, 0.66)
         self.flight_marker.set_color_scale(

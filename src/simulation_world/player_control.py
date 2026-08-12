@@ -18,6 +18,7 @@ class PlayerController:
     def __init__(self) -> None:
         self.unit: Unit | None = None
         self.firing = False
+        self.gun_firing = False
         self.throttle = 1.0
         self.locked_target = None
         self.shot_fired = False
@@ -61,6 +62,7 @@ class PlayerController:
         self.unit.manual_controlled = False
         self.unit = None
         self.firing = False
+        self.gun_firing = False
         self.locked_target = None
         self.shot_fired = False
         return True
@@ -96,6 +98,8 @@ class PlayerController:
                 self.shot_fired = battle.manual_heli_fire(
                     unit, self.locked_target
                 )
+            if self.gun_firing:
+                battle.manual_heli_gun(unit)
         elif unit.kind == "jet":
             throttle_step = float("w" in keys) - float("s" in keys)
             self.throttle = max(

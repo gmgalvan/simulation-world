@@ -279,7 +279,7 @@ class SimulationApp(ShowBase):
                 text = (
                     "HELICOPTERO: W/S adelante-atras   A/D guiñada   "
                     "E/ARRIBA subir   Q/ABAJO bajar   ←/→ desplazar   "
-                    f"CLIC IZQ disparar ({missiles} misiles)   [T] soltar"
+                    f"CLIC IZQ misil ({missiles})   CLIC DER canon   [T] soltar"
                 )
             else:
                 text = (
@@ -325,9 +325,9 @@ class SimulationApp(ShowBase):
         # coordinates rather than relative-mouse capture, which is far more
         # reliable across windowing setups.
         self.accept("mouse1", self._grab_mouse, [True])
-        self.accept("mouse1-up", self._release_mouse)
+        self.accept("mouse1-up", self._release_mouse, [True])
         self.accept("mouse3", self._grab_mouse, [False])
-        self.accept("mouse3-up", self._release_mouse)
+        self.accept("mouse3-up", self._release_mouse, [False])
         self.accept("wheel_up", self._zoom, [-1.0])
         self.accept("wheel_down", self._zoom, [1.0])
         # Inspector: get right up to a single unit and look it over.
@@ -610,15 +610,29 @@ class SimulationApp(ShowBase):
         self.camera.look_at(focus)
 
     def _grab_mouse(self, fire_button: bool = False) -> None:
+        """Left button is the primary weapon, right button the gun.
+
+        While flying, the right button is not needed to look around, so it is
+        free to be a second trigger. That matters for the helicopter, whose
+        missiles are counted: without a dedicated gun button there is no way to
+        save them for something worth spending one on.
+        """
         if self.player_control.active:
             if fire_button:
                 self.player_control.firing = True
+            else:
+                self.player_control.gun_firing = True
             return
         self.dragging = True
         self._drag_from = None
 
-    def _release_mouse(self) -> None:
-        self.player_control.firing = False
+    def _release_mouse(self, fire_button: bool = True) -> None:
+        # Each button clears only its own trigger: letting go of one used to
+        # silence the other as well.
+        if fire_button:
+            self.player_control.firing = False
+        else:
+            self.player_control.gun_firing = False
         self.dragging = False
         self._drag_from = None
 

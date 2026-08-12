@@ -689,6 +689,7 @@ class Battle:
                 # player for steering or fire a second weapon here.
                 unit.target = None
                 unit.cooldown -= dt
+                unit.gun_cooldown = max(0.0, unit.gun_cooldown - dt)
                 self._animate(unit, dt)
                 self._update_damage_cues(unit, dt)
                 continue
@@ -743,6 +744,7 @@ class Battle:
                     unit.pending_salvo = False
 
             unit.cooldown -= dt
+            unit.gun_cooldown = max(0.0, unit.gun_cooldown - dt)
             if engaged and unit.cooldown <= 0.0:
                 self._fire(unit, target)
 
@@ -896,35 +898,12 @@ class Battle:
     def manual_heli_target(self, unit: Unit):
         """Acquire whatever the player-flown helicopter is pointing at.
 
-        A wider cone and a much longer reach than the gun: the missiles are the
-        reason to fly the thing manually, and they outrange the cannon by a
+        A wider cone and a much longer reach than the cannon: the missiles are
+        the reason to fly the thing manually, and they outrange the gun by a
         factor of seven. Aiming is still by pointing the nose, so a hover and a
         pedal turn is how you line a shot up.
         """
-        forward = Vec3(unit.forward)
-        if forward.length_squared() <= 1e-9:
-            return None
-        forward.normalize()
-        best = None
-        best_score = float("inf")
-        for target in self._manual_combat_candidates(unit):
-            if not target.alive or target.team == unit.team:
-                continue
-            if not self._can_detect(unit, target):
-                continue
-            delta = target.position - unit.position
-            distance = delta.length()
-            if distance <= 1e-6 or distance > HELI_MISSILE_RANGE:
-                continue
-            direction = Vec3(delta)
-            direction.normalize()
-            alignment = forward.dot(direction)
-            if alignment < 0.90 or not self._has_line_of_sight(unit, target):
-                continue
-            score = (1.0 - alignment) * 900.0 + distance
-            if score < best_score:
-                best_score, best = score, target
-        return best
+        return self._manual_cone_target(unit, HELI_MISSILE_RANGE, 0.90)
 
     def manual_heli_fire(self, unit: Unit, target=None) -> bool:
         """Fire the player-flown helicopter: a guided round if one is left.
@@ -950,16 +929,77 @@ class Battle:
             self.stats.shot(unit.kind, unit.team)
             return True
 
-        # Cannon: same rules the autonomous helicopter fights by.
-        gun_target = target
-        if gun_target is None or (
-            gun_target.position - unit.position
-        ).length() > unit.spec.attack_range:
-            gun_target = None
-        if gun_target is None:
-            return False
-        self._fire(unit, gun_target)
+        # Racks empty: the same trigger works the cannon, so a pilot who never
+        # finds the dedicated gun button is never left unarmed.
+        self.manual_heli_gun(unit)
         return False
+
+    def manual_heli_gun(self, unit: Unit) -> bool:
+        """Fire the helicopter's cannon along the nose.
+
+        Unlike the missile this needs no lock and always puts rounds out, the
+        way the rifleman's does: a gun you can only fire at something the
+        computer has already picked for you does not feel like a gun.
+        """
+        if (
+            unit.kind != "helicopter"
+            or not unit.alive
+            or not unit.manual_controlled
+            or unit.gun_cooldown > 0.0
+        ):
+            return False
+
+        unit.gun_cooldown = unit.spec.fire_period * self.rng.uniform(0.85, 1.15)
+        self.stats.shot(unit.kind, unit.team)
+        muzzle = unit.muzzle()
+        target = self._manual_cone_target(unit, unit.spec.attack_range, 0.94)
+        aim = muzzle + unit.forward * unit.spec.attack_range
+        if target is not None:
+            aim = target.position
+
+        self.effects.tracer(muzzle, aim, TEAM_COLORS[unit.team])
+        self.effects.muzzle_flash(muzzle, scale=0.7)
+        if target is None:
+            return True
+
+        distance = (target.position - muzzle).length()
+        close = 1.0 - min(1.0, distance / unit.spec.attack_range)
+        if self.rng.random() < 0.35 + 0.5 * close:
+            self._apply_damage(
+                unit,
+                target,
+                unit.spec.damage * self.rng.uniform(0.8, 1.2),
+                weapon="canon de 30 mm",
+            )
+        return True
+
+    def _manual_cone_target(self, unit: Unit, reach: float, min_alignment: float):
+        """Nearest legal target inside a forward cone, best alignment first."""
+        muzzle = unit.muzzle()
+        forward = Vec3(unit.forward)
+        if forward.length_squared() <= 1e-9:
+            return None
+        forward.normalize()
+        best = None
+        best_score = float("inf")
+        for target in self._manual_combat_candidates(unit):
+            if not target.alive or target.team == unit.team:
+                continue
+            if not self._can_detect(unit, target):
+                continue
+            delta = target.position - muzzle
+            distance = delta.length()
+            if distance <= 1e-6 or distance > reach:
+                continue
+            direction = Vec3(delta)
+            direction.normalize()
+            alignment = forward.dot(direction)
+            if alignment < min_alignment or not self._has_line_of_sight(unit, target):
+                continue
+            score = (1.0 - alignment) * 900.0 + distance
+            if score < best_score:
+                best_score, best = score, target
+        return best
 
     def _manual_combat_candidates(self, unit: Unit):
         """Respect the simulation's military-first rule for manual fire too."""

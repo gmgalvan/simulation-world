@@ -375,7 +375,8 @@ uv run main.py
 | `T` | Tomar / soltar el control del fusilero, caza o helicóptero seleccionado |
 | `W/S`, `A/D`, clic izquierdo | Caminar, girar y disparar al controlar un fusilero |
 | `W/S`, `A/D`, `Q/E`, clic izquierdo | Potencia, viraje, altura y misil del caza controlado |
-| `W/S`, `A/D`, `Q/E`, `←/→`, clic izquierdo | Helicóptero: avance, guiñada, colectivo, desplazamiento lateral y disparo |
+| `W/S`, `A/D`, `Q/E`, `←/→` | Helicóptero: avance, guiñada, colectivo y desplazamiento lateral |
+| Clic izquierdo / derecho | Helicóptero: misil guiado (van contados) / cañón de 30 mm |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |
