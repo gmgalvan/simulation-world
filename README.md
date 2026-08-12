@@ -13,7 +13,7 @@ contrarrestan entre sí:
 | 🎯 | Equipo de RPG | Anticarro. Hacen falta ~3 por tanque enemigo |
 | 🛡️ | Tanque Leopard 2 | Para a disparar; un obús mata a un soldado de un tiro |
 | 📡 | Batería antiaérea | La respuesta desde tierra al poder aéreo |
-| 🚁 | Helicóptero Mi-24 | Anticarro volador |
+| 🚁 | Helicóptero Mi-24 | Anticarro volador. Pilotable con `T`: cabina propia y 8 misiles guiados contados |
 | 🛩️ | Convertiplano V-22 | Rápido y duro, poco armado |
 | ✈️ | Caza F-35 | Vuela alto y ataca con misiles guiados |
 | 🚢 | Destructor | 70 m de eslora. Selección automática de arma según distancia: CIWS, cañón de 127 mm o misiles |
@@ -372,9 +372,10 @@ uv run main.py
 | `I` | **Inspeccionar una unidad de cerca** (entrar/salir) |
 | `TAB` / `SHIFT+TAB` | Unidad siguiente / anterior mientras inspeccionas |
 | `V` | Ver de frente desde la unidad seleccionada / volver al inspector |
-| `T` | Tomar / soltar el control del fusilero o caza seleccionado |
+| `T` | Tomar / soltar el control del fusilero, caza o helicóptero seleccionado |
 | `W/S`, `A/D`, clic izquierdo | Caminar, girar y disparar al controlar un fusilero |
 | `W/S`, `A/D`, `Q/E`, clic izquierdo | Potencia, viraje, altura y misil del caza controlado |
+| `W/S`, `A/D`, `Q/E`, `←/→`, clic izquierdo | Helicóptero: avance, guiñada, colectivo, desplazamiento lateral y disparo |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |

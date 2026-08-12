@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from .entities import Unit
 
 
-CONTROLLABLE_KINDS = frozenset({"rifleman", "jet"})
+CONTROLLABLE_KINDS = frozenset({"rifleman", "jet", "helicopter"})
 
 
 class PlayerController:
@@ -75,9 +75,27 @@ class PlayerController:
         turn = float("a" in keys) - float("d" in keys)
         if unit.kind == "rifleman":
             throttle = float("w" in keys) - float("s" in keys)
-            unit.update_manual_rifleman(throttle, turn)
+            unit.update_manual_rifleman(throttle, turn, dt)
             if self.firing:
                 battle.manual_rifle_fire(unit)
+        elif unit.kind == "helicopter":
+            # Same key layout as the jet so nothing has to be relearned, but
+            # the stick means speed rather than throttle: releasing it stops
+            # the aircraft in a hover instead of leaving it flying on.
+            cyclic = float("w" in keys) - float("s" in keys)
+            collective = float("e" in keys or "arrow_up" in keys) - float(
+                "q" in keys or "arrow_down" in keys
+            )
+            strafe = float("arrow_right" in keys) - float("arrow_left" in keys)
+            unit.update_manual_helicopter(
+                terrain, collective, turn, cyclic, strafe, dt
+            )
+            self.throttle = cyclic
+            self.locked_target = battle.manual_heli_target(unit)
+            if self.firing:
+                self.shot_fired = battle.manual_heli_fire(
+                    unit, self.locked_target
+                )
         elif unit.kind == "jet":
             throttle_step = float("w" in keys) - float("s" in keys)
             self.throttle = max(
@@ -87,7 +105,7 @@ class PlayerController:
             climb = float("e" in keys or "arrow_up" in keys) - float(
                 "q" in keys or "arrow_down" in keys
             )
-            unit.update_manual_jet(terrain, self.throttle, turn, climb)
+            unit.update_manual_jet(terrain, self.throttle, turn, climb, dt)
             self.locked_target = battle.manual_jet_target(unit)
             if self.firing:
                 self.shot_fired = battle.manual_jet_fire(

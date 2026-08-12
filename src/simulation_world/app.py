@@ -25,7 +25,7 @@ from panda3d.core import (
 from .assets import AssetLibrary
 from .battle import TEAM_COLORS, TEAM_NAMES, Battle
 from .chunks import ChunkManager
-from .flight_hud import JetHud
+from .flight_hud import HeliHud, JetHud
 from .player_control import PlayerController
 from .terrain import WATER_COLOR, InfiniteTerrain
 
@@ -238,7 +238,11 @@ class SimulationApp(ShowBase):
             align=TextNode.A_center,
         )
         self.crosshair_text.hide()
-        self.jet_hud = JetHud(self.aspect2d)
+        # One cockpit per flyable aircraft, keyed by unit kind.
+        self.cockpits = {
+            "jet": JetHud(self.aspect2d),
+            "helicopter": HeliHud(self.aspect2d),
+        }
         self._refresh_help()
 
     def _inspect_label(self) -> str:
@@ -264,10 +268,18 @@ class SimulationApp(ShowBase):
 
     def _refresh_help(self) -> None:
         if self.player_control.active:
-            if self.player_control.unit.kind == "jet":
+            controlled = self.player_control.unit.kind
+            if controlled == "jet":
                 text = (
                     "CAZA: W/S potencia   A/D virar   E/ARRIBA subir   Q/ABAJO bajar   "
                     "CLIC IZQ misil guiado   [T] soltar   [ESPACIO] pausa"
+                )
+            elif controlled == "helicopter":
+                missiles = self.player_control.unit.manual_missiles
+                text = (
+                    "HELICOPTERO: W/S adelante-atras   A/D guiñada   "
+                    "E/ARRIBA subir   Q/ABAJO bajar   ←/→ desplazar   "
+                    f"CLIC IZQ disparar ({missiles} misiles)   [T] soltar"
                 )
             else:
                 text = (
@@ -283,12 +295,12 @@ class SimulationApp(ShowBase):
             text = (
                 "INSPECCION: [TAB] siguiente unidad   [SHIFT+TAB] anterior   "
                 "ARRASTRA girar   RUEDA acercar   [V] vista frontal   "
-                "[T] controlar fusilero/caza   [I] salir"
+                "[T] controlar fusilero/caza/heli   [I] salir"
             )
         elif self.camera_mode == "unit":
             text = (
                 "VISTA DE UNIDAD: [TAB] siguiente   [SHIFT+TAB] anterior   "
-                "[T] controlar fusilero/caza   [V] volver a inspeccion   [I] salir"
+                "[T] controlar fusilero/caza/heli   [V] volver a inspeccion   [I] salir"
             )
         else:
             text = (
@@ -443,24 +455,29 @@ class SimulationApp(ShowBase):
             return
         self.camera_mode = "unit"
         self.camLens.set_near(0.16)
-        self.camLens.set_fov(78 if self.inspect_unit.kind == "jet" else 60)
-        if self.inspect_unit.kind == "jet":
+        kind = self.inspect_unit.kind
+        self.camLens.set_fov(78 if kind == "jet" else 60)
+        self._hide_cockpits()
+        cockpit = self.cockpits.get(kind)
+        if cockpit is not None:
             self.crosshair_text.hide()
-            self.jet_hud.show()
+            cockpit.show()
         else:
             self.crosshair_text.setText("+")
             self.crosshair_text.show()
-            self.jet_hud.hide()
         self._refresh_help()
 
     def _release_player_control(self) -> bool:
         released = self.player_control.release()
         if hasattr(self, "crosshair_text"):
             self.crosshair_text.hide()
-        if hasattr(self, "jet_hud"):
-            self.jet_hud.hide()
+        self._hide_cockpits()
         self.camLens.set_fov(60)
         return released
+
+    def _hide_cockpits(self) -> None:
+        for cockpit in getattr(self, "cockpits", {}).values():
+            cockpit.hide()
 
     def _restore_unit_view_parts(self) -> None:
         """Restore pieces hidden only to keep a first-person view unobstructed."""
@@ -727,7 +744,7 @@ class SimulationApp(ShowBase):
                 self._physics_debt -= PHYSICS_STEP
 
         self._update_camera(dt)
-        self._update_jet_hud(dt)
+        self._update_cockpit_hud(dt)
         self.chunks.update(self._stream_anchors())
         self._follow_world()
 
@@ -754,20 +771,20 @@ class SimulationApp(ShowBase):
         self._drag_from = None
         self._refresh_help()
 
-    def _update_jet_hud(self, dt: float) -> None:
-        """Feed flight and targeting state to the dedicated cockpit HUD."""
-        if (
-            not self.player_control.active
-            or self.player_control.unit.kind != "jet"
-        ):
+    def _update_cockpit_hud(self, dt: float) -> None:
+        """Feed flight and targeting state to whichever cockpit is in use."""
+        if not self.player_control.active:
             return
         unit = self.player_control.unit
+        cockpit = self.cockpits.get(unit.kind)
+        if cockpit is None:
+            return
         ground = max(
             self.terrain.height_at(unit.position.x, unit.position.y),
             self.terrain.water_level,
         )
         altitude = max(0.0, unit.position.z - ground)
-        self.jet_hud.update(
+        cockpit.update(
             dt,
             unit,
             self.player_control.locked_target,

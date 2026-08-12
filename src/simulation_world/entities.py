@@ -50,6 +50,12 @@ class UnitSpec:
     fire_halt: float = 0.0
 
 
+# Guided rounds carried by a helicopter flown by the player. Eight is what a
+# Mi-24 carries on its outboard pylons, and it is few enough that the shots
+# have to be chosen — an unlimited magazine turns the whole battle into a
+# turkey shoot the moment the player takes a gunship.
+MANUAL_HELI_MISSILES = 8
+
 HELICOPTER = UnitSpec(
     mass=1400.0,
     half_extents=Vec3(1.1, 2.6, 1.0),
@@ -271,6 +277,19 @@ class Unit:
         # this unit.  The controller lives outside Unit so input concerns do
         # not leak into the reusable physics/entity layer.
         self.manual_controlled = False
+        # Where the close-in mounts are currently trained, and how long that
+        # bearing stays valid before they swing back to their parked heading.
+        self.ciws_mounts: list = []
+        self.ciws_aim: Point3 | None = None
+        self.ciws_aim_timer = 0.0
+        # Guided rounds a player-flown helicopter carries. The autonomous AI
+        # never touches these: left to itself the machine fights with its gun,
+        # exactly as before. The magazine belongs to the airframe rather than
+        # to the control session, so letting go and taking the same helicopter
+        # back does not silently rearm it.
+        self.manual_missiles = (
+            MANUAL_HELI_MISSILES if kind == "helicopter" else 0
+        )
         # Procedural infantry animation.  The phase advances from actual
         # horizontal velocity, so steep climbs, firing halts and jams are
         # visible in the gait instead of feet skating at a fixed rate.
@@ -362,10 +381,19 @@ class Unit:
         Firing everything from the forward mount looked wrong for a missile
         coming in over the stern, which is the case the guns exist for.
         """
-        offset = 18.6
+        offset = 16.4
         if toward is not None and self.forward.dot(toward - self.position) < 0.0:
-            offset = -20.6
-        return self.position + self.forward * offset + Vec3(0, 0, 6.9)
+            offset = -18.4
+        pivot = self.position + self.forward * offset + Vec3(0, 0, 6.2)
+        if toward is None:
+            return pivot
+        # Out along the barrel, which is trained on the threat: the tracer has
+        # to leave the muzzle, not the middle of the mount.
+        direction = Vec3(toward) - pivot
+        if direction.length_squared() > 1e-9:
+            direction.normalize()
+            pivot += direction * 2.3
+        return pivot
 
     def can_bear(self, target: Unit) -> bool:
         """Fixed-wing aircraft only shoot at what is lined up ahead of them.
@@ -419,13 +447,40 @@ class Unit:
         angular = self.node.get_angular_velocity()
         self.node.set_angular_velocity(Vec3(angular.x, angular.y, rate))
 
-    def _drive_horizontal(self, desired: Vec3, gain: float = 1.6) -> None:
+    def _apply_control_force(self, force: Vec3, dt: float | None) -> None:
+        """Apply a steering force for one update.
+
+        Bullet discards accumulated forces at the end of every substep, and the
+        application takes as many 1/120 s substeps per frame as the frame is
+        long. A force applied once per frame therefore acts during the first
+        substep only, and everything commanded that way — including weight
+        compensation — is silently scaled down by the substep count. At 30 fps
+        that is a quarter of the intended thrust, which is enough to make a
+        helicopter sink while the pilot holds full collective.
+
+        Passing `dt` converts the force into the impulse it should have
+        delivered across the whole frame, which lands the intended momentum
+        change no matter how the solver subdivides it. The autonomous
+        controllers deliberately still pass None: their behaviour is tuned
+        around the plain per-substep force and changing it would re-balance
+        every engagement in the simulation.
+        """
+        if dt is None:
+            self.node.apply_central_force(force)
+        else:
+            self.node.apply_central_impulse(force * dt)
+
+    def _drive_horizontal(
+        self, desired: Vec3, gain: float = 1.6, dt: float | None = None
+    ) -> None:
         """Push the body towards a desired horizontal velocity."""
         velocity = self.velocity
         error = Vec3(desired.x - velocity.x, desired.y - velocity.y, 0)
-        self.node.apply_central_force(error * self.spec.mass * gain)
+        self._apply_control_force(error * self.spec.mass * gain, dt)
 
-    def update_manual_rifleman(self, throttle: float, turn: float) -> None:
+    def update_manual_rifleman(
+        self, throttle: float, turn: float, dt: float | None = None
+    ) -> None:
         """Apply direct walking orders to a player-controlled rifleman."""
         if self.kind != "rifleman" or not self.alive:
             return
@@ -437,7 +492,64 @@ class Unit:
         self._drive_horizontal(
             self.forward * (speed * throttle),
             gain=self.spec.drive_gain,
+            dt=dt,
         )
+
+    def update_manual_helicopter(
+        self,
+        terrain,
+        collective: float,
+        turn: float,
+        cyclic: float,
+        strafe: float,
+        dt: float | None = None,
+    ) -> None:
+        """Fly a directly controlled helicopter.
+
+        Deliberately not `update_manual_jet`. What makes a rotorcraft feel like
+        one is that it can stop, hold a hover and slide sideways, so thrust is
+        commanded in the horizontal plane rather than only along the nose, and
+        zero stick means zero speed instead of a stall.
+        """
+        if self.kind != "helicopter" or not self.alive:
+            return
+
+        angular = self.node.get_angular_velocity()
+        self.node.set_angular_velocity(
+            Vec3(angular.x, angular.y, turn * self.spec.turn_rate)
+        )
+
+        ground = max(
+            terrain.height_at(self.position.x, self.position.y),
+            terrain.water_level,
+        )
+        clearance = self.position.z - ground
+        commanded_vertical_speed = collective * 11.0
+        # Ground avoidance stays active under manual control, but only bites in
+        # the last few metres: a helicopter that cannot be flown low is not a
+        # helicopter, and the whole point of taking one over is the nap of the
+        # earth attack. It fades out entirely above 9 m.
+        if clearance < 9.0:
+            commanded_vertical_speed = max(
+                commanded_vertical_speed,
+                (9.0 - clearance) * 1.15,
+            )
+        lift = self.spec.mass * (
+            GRAVITY + (commanded_vertical_speed - self.velocity.z) * 2.4
+        )
+        self._apply_control_force(Vec3(0, 0, max(0.0, lift)), dt)
+
+        forward = self.forward
+        flat = Vec3(forward.x, forward.y, 0.0)
+        if flat.length_squared() > 1e-6:
+            flat.normalize()
+        right = Vec3(-flat.y, flat.x, 0.0)
+        # Sideways translation is slower than forward flight, as it is on a
+        # real machine — the tail rotor has to fight the whole time.
+        demand = flat * (self.spec.cruise_speed * cyclic) + right * (
+            self.spec.cruise_speed * 0.55 * strafe
+        )
+        self._drive_horizontal(demand, gain=self.spec.drive_gain, dt=dt)
 
     def update_manual_jet(
         self,
@@ -445,6 +557,7 @@ class Unit:
         throttle: float,
         turn: float,
         climb: float,
+        dt: float | None = None,
     ) -> None:
         """Fly a directly controlled jet without allowing hover or strafing."""
         if self.kind != "jet" or not self.alive:
@@ -471,7 +584,7 @@ class Unit:
         lift = self.spec.mass * (
             GRAVITY + (commanded_vertical_speed - self.velocity.z) * 1.9
         )
-        self.node.apply_central_force(Vec3(0, 0, max(0.0, lift)))
+        self._apply_control_force(Vec3(0, 0, max(0.0, lift)), dt)
 
         forward = self.forward
         flat = Vec3(forward.x, forward.y, 0.0)
@@ -480,6 +593,7 @@ class Unit:
         self._drive_horizontal(
             flat * (self.spec.cruise_speed * throttle),
             gain=self.spec.drive_gain,
+            dt=dt,
         )
 
     def _fly(

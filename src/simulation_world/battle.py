@@ -53,6 +53,11 @@ STRATEGIC_SALVO_SIZE = 3
 # sequencing. Ground/ship strike missiles retain the destroyer's base cycle.
 NAVAL_AA_FIRE_PERIOD = 8.0
 CIWS_MISSILE_RANGE = 90.0
+# Reach and cadence of the guided rounds a player-flown helicopter carries.
+# Both apply to manual fire only; the autonomous gunship still fights with the
+# cannon at its 62 m `attack_range`.
+HELI_MISSILE_RANGE = 420.0
+HELI_MISSILE_PERIOD = 1.6
 CIWS_DEFENSIVE_PERIOD = 0.25
 
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
@@ -473,6 +478,16 @@ class Battle:
         unit.tail_rotor = model.find(f"**/{self.assets.node_name(kind, 'tail_rotor', 'TailRotor')}")
         unit.turret = model.find(f"**/{self.assets.node_name(kind, 'turret', 'Turret')}")
         unit.radar = model.find("**/AirSearchRadar")
+        # Close-in mounts, each with its barrel cluster and its parked heading.
+        # They train on whatever they are shooting at; bolted straight ahead
+        # they read as scenery while tracer leaves them sideways.
+        unit.ciws_mounts = []
+        for mount_name in ("CiwsFwd", "CiwsAft"):
+            mount = model.find(f"**/{mount_name}")
+            if not mount.is_empty():
+                unit.ciws_mounts.append(
+                    (mount, mount.find("**/CiwsBarrel"), mount.get_h())
+                )
         unit.nacelles = [
             model.find(f"**/{self.assets.node_name(kind, 'nacelle_left', 'NacelleLeft')}"),
             model.find(f"**/{self.assets.node_name(kind, 'nacelle_right', 'NacelleRight')}"),
@@ -878,6 +893,74 @@ class Battle:
                 best_score, best = score, target
         return best
 
+    def manual_heli_target(self, unit: Unit):
+        """Acquire whatever the player-flown helicopter is pointing at.
+
+        A wider cone and a much longer reach than the gun: the missiles are the
+        reason to fly the thing manually, and they outrange the cannon by a
+        factor of seven. Aiming is still by pointing the nose, so a hover and a
+        pedal turn is how you line a shot up.
+        """
+        forward = Vec3(unit.forward)
+        if forward.length_squared() <= 1e-9:
+            return None
+        forward.normalize()
+        best = None
+        best_score = float("inf")
+        for target in self._manual_combat_candidates(unit):
+            if not target.alive or target.team == unit.team:
+                continue
+            if not self._can_detect(unit, target):
+                continue
+            delta = target.position - unit.position
+            distance = delta.length()
+            if distance <= 1e-6 or distance > HELI_MISSILE_RANGE:
+                continue
+            direction = Vec3(delta)
+            direction.normalize()
+            alignment = forward.dot(direction)
+            if alignment < 0.90 or not self._has_line_of_sight(unit, target):
+                continue
+            score = (1.0 - alignment) * 900.0 + distance
+            if score < best_score:
+                best_score, best = score, target
+        return best
+
+    def manual_heli_fire(self, unit: Unit, target=None) -> bool:
+        """Fire the player-flown helicopter: a guided round if one is left.
+
+        With the racks empty the trigger still works the cannon, so running dry
+        leaves the player flying a gunship rather than a spectator.
+        """
+        if (
+            unit.kind != "helicopter"
+            or not unit.alive
+            or not unit.manual_controlled
+            or unit.cooldown > 0.0
+        ):
+            return False
+
+        target = target if target is not None else self.manual_heli_target(unit)
+        if target is not None and unit.manual_missiles > 0:
+            unit.manual_missiles -= 1
+            unit.cooldown = HELI_MISSILE_PERIOD
+            self.effects.launch_missile(unit, target, AIR_TO_GROUND)
+            self.effects.smoke_puff(unit.muzzle(), scale=1.2)
+            self.stats.missile(unit.kind, unit.team, AIR_TO_GROUND.weapon_name)
+            self.stats.shot(unit.kind, unit.team)
+            return True
+
+        # Cannon: same rules the autonomous helicopter fights by.
+        gun_target = target
+        if gun_target is None or (
+            gun_target.position - unit.position
+        ).length() > unit.spec.attack_range:
+            gun_target = None
+        if gun_target is None:
+            return False
+        self._fire(unit, gun_target)
+        return False
+
     def _manual_combat_candidates(self, unit: Unit):
         """Respect the simulation's military-first rule for manual fire too."""
         military = [
@@ -915,6 +998,8 @@ class Battle:
             return
 
         distance, missile = min(incoming, key=lambda item: item[0])
+        unit.ciws_aim = Point3(missile.position)
+        unit.ciws_aim_timer = 0.9
         muzzle = unit.naval_ciws_muzzle(missile.position)
         self.effects.ciws_burst(muzzle, missile.position, TEAM_COLORS[unit.team])
         self.stats.shot(unit.kind, unit.team)
@@ -1092,6 +1177,7 @@ class Battle:
             # ship is doing, and stops when the ship dies.
             if not unit.radar.is_empty():
                 unit.radar.set_h(unit.radar.get_h() + 42.0 * dt)
+            self._aim_ciws(unit, dt)
             if not unit.turret.is_empty() and unit.target is not None:
                 unit.turret.look_at(self.render, unit.target.position)
                 unit.turret.set_p(0)
@@ -1117,6 +1203,43 @@ class Battle:
             unit.turret.look_at(self.render, unit.target.position)
             unit.turret.set_p(0)
             unit.turret.set_r(0)
+
+    def _aim_ciws(self, unit: Unit, dt: float) -> None:
+        """Train the close-in mounts on whatever they last engaged.
+
+        Only the mount that can actually bear turns: the forward station cannot
+        shoot through its own superstructure at something astern, which is the
+        reason the ship carries two.
+        """
+        if not unit.ciws_mounts:
+            return
+        unit.ciws_aim_timer = max(0.0, unit.ciws_aim_timer - dt)
+        aim = unit.ciws_aim if unit.ciws_aim_timer > 0.0 else None
+
+        for mount, barrel, rest_heading in unit.ciws_mounts:
+            bears = False
+            if aim is not None:
+                # Compare the threat's bearing with the way this mount parks:
+                # 0 for the forward station, 180 for the one on the hangar.
+                ahead = unit.forward.dot(aim - unit.position) >= 0.0
+                bears = ahead == (abs(rest_heading) < 90.0)
+            if bears:
+                mount.look_at(self.render, aim)
+                mount.set_p(0)
+                mount.set_r(0)
+                if not barrel.is_empty():
+                    delta = aim - mount.get_pos(self.render)
+                    flat = math.hypot(delta.x, delta.y)
+                    elevation = math.degrees(math.atan2(delta.z, max(0.1, flat)))
+                    barrel.set_p(max(-8.0, min(78.0, elevation)))
+                continue
+            # Nothing to shoot: swing back to the parked bearing rather than
+            # freezing wherever the last engagement left the mount.
+            current = mount.get_h()
+            error = (rest_heading - current + 180.0) % 360.0 - 180.0
+            mount.set_h(current + error * min(1.0, 2.2 * dt))
+            if not barrel.is_empty():
+                barrel.set_p(barrel.get_p() + (16.0 - barrel.get_p()) * min(1.0, 2.2 * dt))
 
     @staticmethod
     def _animate_infantry(unit: Unit, dt: float) -> None:
@@ -1182,6 +1305,8 @@ class Battle:
             if distance <= 82.0:
                 unit.cooldown = 0.16 * self.rng.uniform(0.85, 1.15)
                 unit.ciws_cooldown = max(unit.ciws_cooldown, unit.cooldown)
+                unit.ciws_aim = Point3(target.position)
+                unit.ciws_aim_timer = 0.9
                 muzzle = unit.naval_ciws_muzzle(target.position)
                 spread = 2.0 + distance * 0.025
                 aim = target.position + Vec3(
