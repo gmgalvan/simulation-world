@@ -13,9 +13,7 @@ from panda3d.core import (
     CardMaker,
     DirectionalLight,
     Fog,
-    LineSegs,
     NodePath,
-    Point2,
     Point3,
     TextNode,
     TransparencyAttrib,
@@ -27,6 +25,7 @@ from panda3d.core import (
 from .assets import AssetLibrary
 from .battle import TEAM_COLORS, TEAM_NAMES, Battle
 from .chunks import ChunkManager
+from .flight_hud import JetHud
 from .player_control import PlayerController
 from .terrain import WATER_COLOR, InfiniteTerrain
 
@@ -239,18 +238,7 @@ class SimulationApp(ShowBase):
             align=TextNode.A_center,
         )
         self.crosshair_text.hide()
-        target_box = LineSegs("jet-target-box")
-        target_box.set_thickness(2.5)
-        target_box.set_color(1.0, 1.0, 1.0, 1.0)
-        target_box.move_to(-0.045, 0.0, -0.045)
-        target_box.draw_to(0.045, 0.0, -0.045)
-        target_box.draw_to(0.045, 0.0, 0.045)
-        target_box.draw_to(-0.045, 0.0, 0.045)
-        target_box.draw_to(-0.045, 0.0, -0.045)
-        self.target_box = self.aspect2d.attach_new_node(target_box.create())
-        self.target_box.set_depth_test(False)
-        self.target_box.set_depth_write(False)
-        self.target_box.hide()
+        self.jet_hud = JetHud(self.aspect2d)
         self._refresh_help()
 
     def _inspect_label(self) -> str:
@@ -458,20 +446,19 @@ class SimulationApp(ShowBase):
         self.camLens.set_fov(78 if self.inspect_unit.kind == "jet" else 60)
         if self.inspect_unit.kind == "jet":
             self.crosshair_text.hide()
-            self.target_box.show()
+            self.jet_hud.show()
         else:
             self.crosshair_text.setText("+")
             self.crosshair_text.show()
-            self.target_box.hide()
+            self.jet_hud.hide()
         self._refresh_help()
 
     def _release_player_control(self) -> bool:
         released = self.player_control.release()
         if hasattr(self, "crosshair_text"):
             self.crosshair_text.hide()
-        if hasattr(self, "target_box"):
-            self.target_box.hide()
-            self.target_box.set_pos(0, 0, 0)
+        if hasattr(self, "jet_hud"):
+            self.jet_hud.hide()
         self.camLens.set_fov(60)
         return released
 
@@ -702,23 +689,26 @@ class SimulationApp(ShowBase):
             had_control = self.player_control.active
             self.player_control.update(dt, self.keys, self.battle, self.terrain)
             if had_control and not self.player_control.active:
-                self.crosshair_text.hide()
+                # The controller releases itself when its unit dies. Clear
+                # every view-owned element as well, or the next inspected unit
+                # inherits the dead jet's HUD and target cue.
+                self._release_player_control()
                 self._refresh_help()
             elif self.player_control.active:
                 locked = self.player_control.locked_target is not None
                 unit = self.player_control.unit
-                ready = locked and unit.kind == "jet" and unit.cooldown <= 0.0
-                if ready:
-                    colour = (0.32, 1.0, 0.38, 1.0)
-                elif locked and unit.kind == "jet":
-                    colour = (1.0, 0.78, 0.20, 1.0)
-                else:
-                    colour = (0.94, 0.96, 0.88, 0.92)
-                if unit.kind == "jet":
-                    self.target_box.set_color_scale(*colour)
-                else:
+                if unit.kind != "jet":
+                    colour = (
+                        (0.32, 1.0, 0.38, 1.0)
+                        if locked
+                        else (0.94, 0.96, 0.88, 0.92)
+                    )
                     self.crosshair_text.setFg(colour)
             self.battle.step(dt)
+            # Damage and missile impacts happen inside Battle.step. Validate a
+            # second time in the same frame so a destroyed aircraft cannot
+            # lend its cockpit HUD to the next unit for even one rendered frame.
+            self._sync_player_control_view()
             # Fixed-step the solver so behaviour does not depend on framerate.
             self._physics_debt += dt
             while self._physics_debt >= PHYSICS_STEP:
@@ -726,7 +716,7 @@ class SimulationApp(ShowBase):
                 self._physics_debt -= PHYSICS_STEP
 
         self._update_camera(dt)
-        self._update_target_box()
+        self._update_jet_hud(dt)
         self.chunks.update(self._stream_anchors())
         self._follow_world()
 
@@ -736,53 +726,48 @@ class SimulationApp(ShowBase):
             controlled = ""
             if self.player_control.active:
                 controlled = " — CONTROL MANUAL"
-                if self.player_control.unit.kind == "jet":
-                    if self.player_control.locked_target is None:
-                        lock = "SIN BLOQUEO"
-                    elif self.player_control.unit.cooldown > 0.0:
-                        lock = f"RECARGANDO {self.player_control.unit.cooldown:.1f}s"
-                    else:
-                        lock = "MISIL LISTO"
-                    ground = max(
-                        self.terrain.height_at(
-                            self.player_control.unit.position.x,
-                            self.player_control.unit.position.y,
-                        ),
-                        self.terrain.water_level,
-                    )
-                    altitude = max(
-                        0.0,
-                        self.player_control.unit.position.z - ground,
-                    )
-                    controlled += (
-                        f" — potencia {self.player_control.throttle * 100:.0f}%"
-                        f" — altura {altitude:.0f}m"
-                        f" — {lock}"
-                    )
             self.status_text.setText(self._inspect_label() + controlled + suffix)
         else:
             self.status_text.setText(self.battle.status_text() + suffix)
         self._update_roster()
         return task.cont
 
-    def _update_target_box(self) -> None:
-        """Place the jet acquisition box over its locked target on screen."""
+    def _sync_player_control_view(self) -> None:
+        """Keep controller ownership and all view-only state atomic."""
+        if not self.player_control.active:
+            return
+        if self.player_control.validate():
+            return
+        self._release_player_control()
+        self.dragging = False
+        self._drag_from = None
+        self._refresh_help()
+
+    def _update_jet_hud(self, dt: float) -> None:
+        """Feed flight and targeting state to the dedicated cockpit HUD."""
         if (
             not self.player_control.active
             or self.player_control.unit.kind != "jet"
-            or self.target_box.is_hidden()
         ):
             return
-        target = self.player_control.locked_target
-        if target is None:
-            self.target_box.set_pos(0, 0, 0)
-            return
-        camera_point = self.camera.get_relative_point(self.render, target.position)
-        screen_point = Point2()
-        if self.camLens.project(camera_point, screen_point):
-            self.target_box.set_pos(screen_point.x, 0, screen_point.y)
-        else:
-            self.target_box.set_pos(0, 0, 0)
+        unit = self.player_control.unit
+        ground = max(
+            self.terrain.height_at(unit.position.x, unit.position.y),
+            self.terrain.water_level,
+        )
+        altitude = max(0.0, unit.position.z - ground)
+        self.jet_hud.update(
+            dt,
+            unit,
+            self.player_control.locked_target,
+            self.player_control.throttle,
+            altitude,
+            self.camera,
+            self.render,
+            self.camLens,
+            self.get_aspect_ratio(),
+            self.player_control.shot_fired,
+        )
 
     def _write_report_once(self) -> None:
         """Dump the battle report the moment the battle is decided."""
@@ -815,6 +800,14 @@ class SimulationApp(ShowBase):
         return "   crucero: " + "  |  ".join(parts) if parts else ""
 
     def _update_roster(self) -> None:
+        if (
+            self.player_control.active
+            and self.player_control.unit.kind == "jet"
+        ):
+            for text in self.roster_text.values():
+                text.setText("")
+            self.civil_text.setText("")
+            return
         for team, text in self.roster_text.items():
             counts = self.battle.roster(team)
             parts = [f"{label} {counts.get(kind, 0)}" for kind, label in ROSTER]

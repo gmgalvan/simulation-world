@@ -285,7 +285,13 @@ class Effects:
             np.set_z(missile.run_level)
             missile.prev_pos = Point3(np.get_pos())
         self.missiles.append(missile)
-        self.muzzle_flash(start, scale=1.1)
+        jet_launch = getattr(shooter, "kind", None) == "jet"
+        self.muzzle_flash(start, scale=1.65 if jet_launch else 1.1)
+        if jet_launch:
+            # A brief dense plume makes the rail launch readable from the
+            # cockpit and from external cameras before the normal trail begins.
+            for distance, scale in ((0.35, 0.46), (0.75, 0.38), (1.15, 0.30)):
+                self.smoke_puff(start - direction * distance, scale=scale)
 
     def intercept_missile(self, missile: Missile) -> bool:
         """Remove an airborne missile destroyed by a close-in defence burst."""

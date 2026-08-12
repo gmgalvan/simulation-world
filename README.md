@@ -207,7 +207,14 @@ helicóptero. El clic izquierdo lanza su misil guiado únicamente si existe un
 blanco enemigo dentro del alcance y del cono frontal; respeta la recarga y
 queda registrado en las estadísticas normales. El recuadro de adquisición es
 blanco sin bloqueo, amarillo durante la recarga y verde cuando el misil está
-listo para lanzarse. `T` devuelve el caza a la IA.
+listo para lanzarse. En modo piloto aparece además un HUD propio con marcador
+de vuelo, horizonte artificial, velocidad, altura, velocidad vertical, rumbo y
+potencia; el recuadro sigue al blanco y pulsa cuando el misil está listo. Al
+lanzar muestra `MISIL FUERA` y el proyectil deja un fogonazo y una nube inicial
+más visibles. La vista incluye interior de cabina procedural: tablero, visera,
+pantallas laterales, marco y montantes del parabrisas y cristal HUD translúcido.
+El roster general se oculta durante el vuelo para despejar la vista. `T`
+devuelve el caza a la IA.
 
 **Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
 zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
@@ -502,6 +509,7 @@ src/simulation_world/
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
   player_control.py             # control manual opcional de fusilero y caza
+  flight_hud.py                 # instrumentos y adquisición del caza controlado
   app.py                        # ventana, luces, cámara, HUD, bucle principal
   stats.py                      # recuento e informes TXT/JSON de la batalla
   simulation.py                 # CLI

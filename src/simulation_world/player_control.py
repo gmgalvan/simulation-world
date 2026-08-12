@@ -20,10 +20,22 @@ class PlayerController:
         self.firing = False
         self.throttle = 1.0
         self.locked_target = None
+        self.shot_fired = False
 
     @property
     def active(self) -> bool:
         return self.unit is not None
+
+    def validate(self) -> bool:
+        """Drop ownership immediately when the controlled unit is no longer valid."""
+        if self.can_take(self.unit):
+            if self.locked_target is not None and not getattr(
+                self.locked_target, "alive", False
+            ):
+                self.locked_target = None
+            return True
+        self.release()
+        return False
 
     @staticmethod
     def can_take(unit: Unit | None) -> bool:
@@ -40,6 +52,7 @@ class PlayerController:
         unit.target = None
         self.throttle = 1.0
         self.locked_target = None
+        self.shot_fired = False
         return True
 
     def release(self) -> bool:
@@ -49,13 +62,14 @@ class PlayerController:
         self.unit = None
         self.firing = False
         self.locked_target = None
+        self.shot_fired = False
         return True
 
     def update(self, dt: float, keys: set[str], battle: Battle, terrain) -> bool:
         """Drive and fire once per frame; return False if control was lost."""
         unit = self.unit
-        if not self.can_take(unit):
-            self.release()
+        self.shot_fired = False
+        if not self.validate():
             return False
 
         turn = float("a" in keys) - float("d" in keys)
@@ -76,5 +90,7 @@ class PlayerController:
             unit.update_manual_jet(terrain, self.throttle, turn, climb)
             self.locked_target = battle.manual_jet_target(unit)
             if self.firing:
-                battle.manual_jet_fire(unit, self.locked_target)
+                self.shot_fired = battle.manual_jet_fire(
+                    unit, self.locked_target
+                )
         return True
