@@ -51,6 +51,9 @@ Errores que ya se han cometido en este repositorio. Merece la pena comprobarlos 
 
 - **Nodos huérfanos.** `make_box` y `make_loft` devuelven un `NodePath` suelto; si olvidas `reparent_to`, la pieza no aparece y no hay error. Ha pasado con las tomas del caza, las chimeneas del destructor y los esponjones del Osprey.
 - **Palas de rotor.** Una caja centrada cuenta como **dos** palas. Un rotor tripala necesita cajas desplazadas a un lado repartidas en 360°, o salen seis.
+- **Eje de apilado en `make_loft`.** Los anillos deben apilarse a lo largo del eje de la pieza. Para algo *vertical* (un mástil, la vela del submarino) hay que usar `_pod_ring`/`_superellipse_ring`, que dan secciones horizontales; con `_round_ring` los dos anillos caen en el mismo plano, el loft degenera en una chapa plana y la pieza desaparece de canto. Mismo fallo en las aletas del submarino: un plano de control se construye apilando secciones **a lo largo de la envergadura** y luego se gira con `set_r`.
+- **Sentido de giro de los anillos.** `_hull_ring`/`_chined_ring` recorren la sección en sentido contrario a `_tube_ring`/`_round_ring`. `make_loft` ya deduce la orientación de las tapas de la propia geometría; si añades un helper de anillos nuevo, no hace falta seguir ninguna convención, pero comprueba que las tapas no salgan negras (se estaría viendo el interior).
+- **`make_box` recibe semiejes.** El parámetro `size` es media arista, no arista completa: `make_box((1.6, ...))` mide 3.2 de ancho.
 - **`__slots__`.** Varias clases lo usan (`Missile`, `Shell`). Añadir un atributo en `__init__` sin declararlo en `__slots__` revienta en tiempo de ejecución, no al importar.
 - **Modos de cámara.** `camera_mode` admite valores fuera de `CAMERA_MODES` (por ejemplo `"inspect"`). Cualquier código que haga `CAMERA_MODES.index(...)` debe tolerarlo.
 - **Sin ventana no hay ratón.** `mouseWatcherNode` es `None` en modo `--shots`; protégelo antes de usarlo.

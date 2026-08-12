@@ -78,6 +78,12 @@ def make_loft(rings, color, cap_start: bool = True, cap_end: bool = True) -> Nod
 
     ``rings`` is a list of equal-length point rings, each ordered consistently
     around the section; consecutive rings are joined with quads.
+
+    The end caps work out their own winding from the geometry rather than
+    assuming one. The ring helpers in this file do not agree on a direction —
+    ``_hull_ring`` runs one way round the section and ``_tube_ring`` the other —
+    so any fixed convention leaves half the models with inside-out caps, lit
+    from behind and rendering as black holes. The destroyer's transom was one.
     """
     faces: list[tuple[int, ...]] = []
     vertices: list[tuple[float, float, float]] = []
@@ -92,13 +98,38 @@ def make_loft(rings, color, cap_start: bool = True, cap_end: bool = True) -> Nod
             j = (i + 1) % size
             faces.append((a + i, b + i, b + j, a + j))
 
-    if cap_start:
-        faces.append(tuple(range(size - 1, -1, -1)))
-    if cap_end:
-        base = (len(rings) - 1) * size
-        faces.append(tuple(range(base, base + size)))
+    if cap_start or cap_end:
+        axis = tuple(
+            sum(p[k] for p in rings[-1]) / size - sum(p[k] for p in rings[0]) / size
+            for k in range(3)
+        )
+        if cap_start:
+            order = tuple(range(size))
+            # Outward at this end is against the loft axis.
+            if _ring_facing(rings[0], axis) > 0.0:
+                order = order[::-1]
+            faces.append(order)
+        if cap_end:
+            base = (len(rings) - 1) * size
+            order = tuple(range(base, base + size))
+            if _ring_facing(rings[-1], axis) < 0.0:
+                order = order[::-1]
+            faces.append(order)
 
     return make_solid(vertices, faces, color)
+
+
+def _ring_facing(ring, axis) -> float:
+    """Sign of the ring's own normal projected onto `axis` (Newell's method)."""
+    nx = ny = nz = 0.0
+    count = len(ring)
+    for i in range(count):
+        x0, y0, z0 = ring[i]
+        x1, y1, z1 = ring[(i + 1) % count]
+        nx += (y0 - y1) * (z0 + z1)
+        ny += (z0 - z1) * (x0 + x1)
+        nz += (x0 - x1) * (y0 + y1)
+    return nx * axis[0] + ny * axis[1] + nz * axis[2]
 
 
 def make_solid(vertices, faces, color) -> NodePath:
@@ -410,6 +441,177 @@ def _hull_ring(y: float, w_top: float, w_bot: float, z_top: float, z_bot: float)
     ]
 
 
+def _chined_ring(
+    y: float,
+    w_deck: float,
+    w_chine: float,
+    w_keel: float,
+    z_deck: float,
+    z_chine: float,
+    z_keel: float,
+):
+    """Six-point hull section with a knuckle between deck edge and keel.
+
+    A plain trapezoid cannot describe a warship's forward sections, where the
+    plating flares outwards above the waterline and tucks sharply in below it.
+    That knuckle line running from the stem back to amidships is most of what
+    separates a destroyer's profile from a barge's.
+    """
+    return [
+        (-w_deck, y, z_deck),
+        (w_deck, y, z_deck),
+        (w_chine, y, z_chine),
+        (w_keel, y, z_keel),
+        (-w_keel, y, z_keel),
+        (-w_chine, y, z_chine),
+    ]
+
+
+def _lattice_mast(
+    y: float,
+    z_base: float,
+    z_top: float,
+    half_base: float,
+    half_top: float,
+    color,
+    yards=(),
+) -> NodePath:
+    """A tapering mast tower with horizontal yards, standing at station `y`.
+
+    Built in two parts because that is how the reference ships are built: an
+    enclosed plated tower for the lower half, carrying the heavy arrays, and a
+    thin pole above it for the whip antennas. Modelled as a single taper it
+    came out looking like a flagpole.
+    """
+    mast = NodePath("Mast")
+    z_shoulder = z_base + (z_top - z_base) * 0.46
+    half_shoulder = half_base * 0.60
+    # Sections must be stacked horizontally for something that runs vertically.
+    # Built from XZ-plane sections instead, both rings landed in the same plane
+    # and the loft degenerated into a flat plate — the mast rendered as a
+    # hairline that vanished whenever the ship turned edge-on.
+    make_loft(
+        [
+            _pod_ring(z_base, half_base * 1.30, half_base * 1.45, y, sides=6),
+            _pod_ring(z_base + (z_shoulder - z_base) * 0.25, half_base, half_base * 1.20, y, sides=6),
+            _pod_ring(z_shoulder, half_shoulder, half_shoulder * 1.20, y, sides=6),
+        ],
+        color,
+    ).reparent_to(mast)
+    # Upper pole.
+    make_loft(
+        [
+            _pod_ring(z_shoulder, half_shoulder * 0.82, half_shoulder * 0.90, y, sides=6),
+            _pod_ring(z_top, half_top, half_top, y, sides=6),
+        ],
+        color,
+    ).reparent_to(mast)
+    for frac, span in yards:
+        z = z_base + (z_top - z_base) * frac
+        make_box((span, 0.06, 0.07), color, (0, y, z)).reparent_to(mast)
+        for side in (-1, 1):
+            # Vertical whip at each yardarm, rooted on the yard itself. The
+            # earlier version also carried angled stays; built as rotated boxes
+            # they swung clear of the mast and read as debris hanging in mid-air.
+            make_box((0.05, 0.05, 0.22), color,
+                     (side * span * 0.90, y, z + 0.22)).reparent_to(mast)
+    return mast
+
+
+def _superellipse_ring(
+    z: float,
+    half_x: float,
+    half_y: float,
+    cy: float = 0.0,
+    squareness: float = 2.6,
+    sides: int = 16,
+):
+    """Rounded-rectangle outline in the XY plane at height `z`.
+
+    ``squareness`` 2.0 gives a plain ellipse; higher values push the outline
+    towards a rectangle with rounded corners. A submarine's sail is neither —
+    it is a rounded slab, and an ellipse made it look like a blimp.
+    """
+    exponent = 2.0 / squareness
+    ring = []
+    for i in range(sides):
+        angle = i * math.tau / sides
+        c, s = math.cos(angle), math.sin(angle)
+        ring.append(
+            (
+                half_x * math.copysign(abs(c) ** exponent, c),
+                cy + half_y * math.copysign(abs(s) ** exponent, s),
+                z,
+            )
+        )
+    return ring
+
+
+def _ciws_mount(grey, dark) -> NodePath:
+    """A Phalanx-pattern close-in gun, muzzle along +Y.
+
+    Three parts carry the whole silhouette and nothing else matters at battle
+    range: the tall white search/track radome standing vertically with its
+    domed cap, the faceted grey gun housing under it, and the black rotary
+    barrel cluster cantilevered out front with its perforated muzzle shroud.
+    """
+    mount = NodePath("Ciws")
+    white = (0.90, 0.90, 0.88, 1.0)
+
+    # Pedestal and the training base it rotates on.
+    make_box((0.34, 0.34, 0.09), _shade(grey, 0.78), (0, 0, 0.09)).reparent_to(mount)
+    make_loft(
+        [_pod_ring(0.18, 0.27, 0.27), _pod_ring(0.40, 0.24, 0.24)],
+        _shade(grey, 0.9),
+    ).reparent_to(mount)
+
+    # Gun housing: sloped front plate, wider at the shoulders than the base.
+    make_loft(
+        [
+            _hull_ring(-0.30, 0.26, 0.22, 1.02, 0.36),
+            _hull_ring(0.14, 0.29, 0.25, 1.06, 0.36),
+            _hull_ring(0.30, 0.26, 0.23, 0.92, 0.40),
+        ],
+        grey,
+    ).reparent_to(mount)
+
+    # Radome: vertical drum, slightly conical, with a rounded cap. This is the
+    # part people recognise, so it is the tallest thing on the mount.
+    make_loft(
+        [
+            _pod_ring(0.86, 0.25, 0.25),
+            _pod_ring(1.46, 0.23, 0.23),
+            _pod_ring(1.60, 0.20, 0.20),
+            _pod_ring(1.68, 0.13, 0.13),
+            _pod_ring(1.72, 0.05, 0.05),
+        ],
+        white,
+    ).reparent_to(mount)
+    # Banding round the drum, as in the photographs.
+    for z in (1.02, 1.30):
+        make_loft(
+            [_pod_ring(z, 0.26, 0.26), _pod_ring(z + 0.04, 0.26, 0.26)],
+            _shade(white, 0.88),
+        ).reparent_to(mount)
+
+    # Barrel cluster on its trunnion, elevated the way it sits when tracking.
+    barrel = NodePath("CiwsBarrel")
+    barrel.set_pos(0, 0.24, 0.80)
+    barrel.set_p(16.0)
+    barrel.reparent_to(mount)
+    make_loft([_tube_ring(0.02, 0.13), _tube_ring(0.20, 0.12)], _shade(grey, 1.1)).reparent_to(barrel)
+    make_loft([_tube_ring(0.20, 0.075), _tube_ring(0.74, 0.075)], dark).reparent_to(barrel)
+    # Perforated muzzle shroud: fatter than the barrels behind it.
+    make_loft([_tube_ring(0.74, 0.125), _tube_ring(1.02, 0.125)], dark).reparent_to(barrel)
+    make_loft([_tube_ring(1.02, 0.10), _tube_ring(1.06, 0.10)], _shade(dark, 0.5)).reparent_to(barrel)
+    # Ammunition drum slung under the trunnion.
+    make_loft(
+        [_tube_ring(-0.18, 0.20, z=-0.30), _tube_ring(0.16, 0.20, z=-0.30)],
+        _shade(grey, 0.85),
+    ).reparent_to(mount)
+    return mount
+
+
 def _disc_ring(x: float, y: float, z: float, radius: float, sides: int = 8):
     """Polygonal wheel section in the YZ plane, extruded along X."""
     return [
@@ -548,46 +750,123 @@ def build_placeholder_submarine(color) -> NodePath:
     hull = (0.19, 0.21, 0.23, 1.0)
     dark = (0.09, 0.10, 0.12, 1.0)
     deck = (0.26, 0.28, 0.30, 1.0)
+    axis = -0.55  # centreline height, kept from the original placeholder
 
-    # Teardrop pressure hull.
+    # Pressure hull. Sixteen-sided sections instead of eight: a submarine is
+    # one long unbroken curve, and at eight sides the facet edges caught the
+    # light hard enough that the boat read as a hexagonal pencil. The extra
+    # stations forward give a proper ogive nose rather than a blunt cone.
     make_loft(
         [
-            _round_ring(12.6, 0.20, 0.20, -0.55),
-            _round_ring(11.2, 0.95, 0.95, -0.55),
-            _round_ring(7.0, 1.72, 1.72, -0.55),
-            _round_ring(0.0, 1.90, 1.90, -0.55),
-            _round_ring(-7.5, 1.74, 1.74, -0.55),
-            _round_ring(-11.4, 1.05, 1.05, -0.55),
-            _round_ring(-13.2, 0.34, 0.34, -0.55),
+            _round_ring(26.4, 0.16, 0.16, axis, sides=16),
+            _round_ring(25.6, 0.88, 0.88, axis, sides=16),
+            _round_ring(24.0, 1.48, 1.48, axis, sides=16),
+            _round_ring(21.5, 2.06, 2.06, axis, sides=16),
+            _round_ring(18.0, 2.56, 2.56, axis, sides=16),
+            _round_ring(13.5, 2.90, 2.90, axis, sides=16),
+            _round_ring(7.0, 3.05, 3.05, axis, sides=16),
+            _round_ring(0.0, 3.06, 3.06, axis, sides=16),
+            _round_ring(-8.0, 3.02, 3.02, axis, sides=16),
+            _round_ring(-14.0, 2.74, 2.74, axis, sides=16),
+            _round_ring(-19.0, 2.12, 2.12, axis, sides=16),
+            _round_ring(-22.5, 1.44, 1.44, axis, sides=16),
+            _round_ring(-24.8, 0.80, 0.80, axis, sides=16),
         ],
         hull,
     ).reparent_to(root)
-
-    # Sail, its planes, and the masts that show above the waterline.
+    # Casing: the narrow flat walking deck along the top of the hull. Sections
+    # taken fore-and-aft, not stacked in height — built the other way round it
+    # sheared into a flat wing hanging off the bow.
     make_loft(
         [
-            _hull_ring(3.30, 0.62, 0.70, 2.35, -0.30),
-            _hull_ring(1.60, 0.72, 0.82, 2.55, -0.30),
-            _hull_ring(-0.90, 0.70, 0.80, 2.45, -0.30),
-            _hull_ring(-2.10, 0.52, 0.62, 2.10, -0.30),
+            _hull_ring(21.5, 0.42, 0.62, axis + 2.62, axis + 2.40),
+            _hull_ring(15.0, 0.88, 1.06, axis + 2.96, axis + 2.74),
+            _hull_ring(4.0, 1.02, 1.20, axis + 3.08, axis + 2.86),
+            _hull_ring(-9.0, 0.96, 1.14, axis + 3.04, axis + 2.82),
+            _hull_ring(-15.5, 0.62, 0.80, axis + 2.80, axis + 2.60),
+        ],
+        _shade(hull, 1.14),
+    ).reparent_to(root)
+
+    # Sail: a rounded slab, tapering as it rises, with a faired leading edge.
+    make_loft(
+        [
+            _superellipse_ring(axis + 2.40, 1.16, 4.30, 3.00, 2.8, 16),
+            _superellipse_ring(axis + 4.60, 1.06, 4.10, 3.10, 3.0, 16),
+            _superellipse_ring(axis + 6.20, 0.90, 3.70, 3.20, 3.2, 16),
+            _superellipse_ring(axis + 6.75, 0.66, 3.30, 3.25, 3.2, 16),
         ],
         deck,
     ).reparent_to(root)
-    for side in (-1, 1):
-        make_box((1.9, 0.9, 0.16), deck, (side * 1.35, 0.6, 1.75)).reparent_to(root)
-    make_box((0.14, 0.14, 1.5), dark, (0.22, 0.4, 3.15)).reparent_to(root)
-    make_box((0.12, 0.12, 1.1), dark, (-0.24, -0.5, 2.95)).reparent_to(root)
-    make_box((0.5, 0.5, 0.18), _shade(color, 1.1), (0, -1.6, 2.55)).reparent_to(root)
+    # Sail planes: thin swept fins, thicker at the root than the tip.
+    # A control surface is a blade: thin across, broad in chord, tapering
+    # outboard. Sections are stacked along the span and the whole blade is then
+    # rolled into place, which is the only way to get that from lofted rings.
+    def _blade(chord_root, chord_tip, span, thick, taper_shift=0.0):
+        return make_loft(
+            [
+                _pod_ring(0.0, thick, chord_root, 0.0, sides=8),
+                _pod_ring(span * 0.62, thick * 0.74, chord_root * 0.80,
+                          taper_shift * 0.62, sides=8),
+                _pod_ring(span, thick * 0.42, chord_tip, taper_shift, sides=8),
+            ],
+            deck,
+        )
 
-    # Vertical launch hatches forward of the sail, and the stern planes.
-    for i in range(3):
-        for side in (-1, 1):
-            make_box((0.70, 0.70, 0.14), dark, (side * 0.85, 6.4 - i * 1.25, 0.98)).reparent_to(root)
     for side in (-1, 1):
-        make_box((2.6, 1.5, 0.16), deck, (side * 1.9, -11.2, -0.55)).reparent_to(root)
-    make_box((0.18, 1.6, 2.6), deck, (0, -11.2, 0.35)).reparent_to(root)
+        plane = _blade(1.35, 0.78, 3.05, 0.15, -0.35)
+        plane.set_pos(0, 0.60, axis + 4.55)
+        plane.set_r(side * 90.0)
+        plane.reparent_to(root)
+    # Masts and the periscope fairing on top of the sail.
+    make_loft([_pod_ring(axis + 6.75, 0.12, 0.12, 3.9), _pod_ring(axis + 9.20, 0.09, 0.09, 3.9)],
+              dark).reparent_to(root)
+    make_loft([_pod_ring(axis + 6.75, 0.10, 0.10, 2.3), _pod_ring(axis + 8.40, 0.07, 0.07, 2.3)],
+              dark).reparent_to(root)
+    make_box((0.60, 0.60, 0.16), _shade(color, 1.1), (0, 1.10, axis + 6.85)).reparent_to(root)
+
+    # Vertical launch hatches on the foredeck, each on its own hinge so the
+    # launch effect can throw the lids open before the missiles come out.
+    for i in range(6):
+        for side in (-1, 1):
+            hatch = NodePath(f"LaunchHatch{i}{'S' if side > 0 else 'P'}")
+            hatch.set_pos(side * 1.02, 18.6 - i * 1.55, axis + 3.02)
+            hatch.reparent_to(root)
+            make_loft(
+                [_pod_ring(-0.05, 0.56, 0.56), _pod_ring(0.06, 0.56, 0.56)],
+                _shade(hull, 0.8),
+            ).reparent_to(hatch)
+            # The bore below, visible once the lid swings clear.
+            make_loft(
+                [_pod_ring(-0.90, 0.44, 0.44), _pod_ring(0.04, 0.44, 0.44)],
+                (0.03, 0.03, 0.04, 1.0),
+            ).reparent_to(hatch)
+            hinge = hatch.attach_new_node("Hinge")
+            hinge.set_pos(0, -0.50, 0.06)
+            lid = make_loft(
+                [_pod_ring(0.0, 0.50, 0.50, 0.50), _pod_ring(0.09, 0.50, 0.50, 0.50)],
+                _shade(deck, 1.15),
+            )
+            lid.reparent_to(hinge)
+
+    # Stern control surfaces in X form, as on the reference boat, plus the
+    # shrouded pump-jet propulsor.
+    for i in range(4):
+        fin = _blade(2.30, 1.15, 4.90, 0.20, -1.60)
+        fin.set_pos(0, -18.2, axis)
+        fin.set_r(45.0 + i * 90.0)
+        fin.reparent_to(root)
     make_loft(
-        [_round_ring(-13.0, 0.55, 0.55, -0.55), _round_ring(-14.1, 0.30, 0.30, -0.55)],
+        [
+            _round_ring(-24.6, 1.05, 1.05, axis, sides=14),
+            _round_ring(-26.4, 1.16, 1.16, axis, sides=14),
+            _round_ring(-27.0, 1.10, 1.10, axis, sides=14),
+        ],
+        _shade(hull, 0.85),
+    ).reparent_to(root)
+    make_loft(
+        [_round_ring(-25.0, 0.46, 0.46, axis, sides=10),
+         _round_ring(-26.6, 0.30, 0.30, axis, sides=10)],
         dark,
     ).reparent_to(root)
 
@@ -602,127 +881,331 @@ def build_placeholder_destroyer(color) -> NodePath:
     gun turret and two banks of vertical-launch cells.
     """
     root = NodePath("destroyer_placeholder")
+    # Built at a convenient working size and scaled at the end. The shape that
+    # reads as "warship" is mostly one number: length over beam. Real
+    # destroyers run about 8:1 (Arleigh Burke 155 x 20 m), and at the 4:3:1
+    # this hull used to have it looked like a tug no matter how much detail
+    # was piled on top. Everything below is laid out to keep that ratio.
+    scale = 2.15
     # Naval grey stays distinct from both the blue sea and the red/blue team
     # colours. Small identification panels carry the team colour instead.
-    hull = (0.34, 0.37, 0.39, 1.0)
-    deck = (0.48, 0.51, 0.52, 1.0)
-    superstructure = (0.58, 0.61, 0.62, 1.0)
-    dark = (0.10, 0.13, 0.16, 1.0)
-    radar = (0.32, 0.42, 0.48, 1.0)
+    # Haze grey, as in the photographs. The first pass used a 0.34 hull, which
+    # under this lighting came out almost black and swallowed every panel line
+    # on it; real warship grey is light, and it is the dark boot topping and
+    # the darker deck that give the hull its contrast.
+    hull = (0.54, 0.57, 0.59, 1.0)
+    boot = (0.12, 0.14, 0.16, 1.0)
+    deck = (0.40, 0.43, 0.45, 1.0)
+    superstructure = (0.58, 0.61, 0.63, 1.0)
+    dark = (0.16, 0.18, 0.21, 1.0)
+    radar = (0.38, 0.46, 0.52, 1.0)
 
-    # Hull with a raked, flared bow: the sheer rises towards the stem and the
-    # beam pinches in at the forefoot, which is what makes a warship read as
-    # one from the side rather than as a barge.
+    # Hull: 32.6 long by 4.2 in the beam, so 7.8:1. The knuckle line flares
+    # out above the waterline forward and tucks under aft, and the sheer lifts
+    # a full metre towards the stem — the raked bow of the reference ships.
+    stations = [
+        # y,     deck,  chine, keel,  z_deck, z_chine, z_keel
+        (17.00, 0.10, 0.09, 0.05, 1.62, 0.30, -0.50),
+        (15.40, 0.62, 0.46, 0.16, 1.42, 0.02, -0.95),
+        (13.20, 1.18, 0.94, 0.40, 1.18, -0.14, -1.18),
+        (10.00, 1.76, 1.52, 0.78, 0.92, -0.26, -1.30),
+        (6.00, 2.04, 1.88, 1.14, 0.74, -0.32, -1.34),
+        (1.00, 2.10, 2.02, 1.40, 0.62, -0.34, -1.34),
+        (-5.00, 2.10, 2.02, 1.42, 0.58, -0.34, -1.32),
+        (-10.50, 2.00, 1.90, 1.30, 0.56, -0.32, -1.24),
+        (-14.20, 1.82, 1.74, 1.40, 0.54, -0.30, -0.90),
+        (-15.60, 1.72, 1.68, 1.54, 0.54, -0.34, -0.60),
+    ]
+    make_loft([_chined_ring(*s) for s in stations], hull).reparent_to(root)
+    # Boot topping: the dark band at the waterline. Cheap, and it does more for
+    # reading the hull as floating than any amount of superstructure detail.
+    # Its lower edge has to follow the hull inwards — carried at constant width
+    # it stood proud of the tuck aft and hung off the stern as a dark blade.
+    boot_rings = []
+    for _y, _deck, chine, keel, _zd, z_chine, z_keel in stations[1:]:
+        drop = 0.30
+        blend = min(1.0, drop / max(0.05, z_chine - z_keel))
+        # Stop just short of the transom: run flush to it and the band's end
+        # cap lands exactly on the transom plate and the two z-fight.
+        boot_rings.append(
+            _hull_ring(
+                _y + (0.22 if _y <= stations[-1][0] else 0.0),
+                chine * 1.004,
+                (chine + (keel - chine) * blend) * 1.004,
+                z_chine + 0.15,
+                z_chine - drop,
+            )
+        )
+    make_loft(boot_rings, boot).reparent_to(root)
+
+    # Main deck, following the hull outline instead of a rectangle laid on top.
     make_loft(
         [
-            _hull_ring(14.4, 0.16, 0.12, 1.05, -0.72),
-            _hull_ring(12.6, 1.05, 0.62, 0.92, -1.02),
-            _hull_ring(10.2, 2.20, 1.72, 0.74, -1.20),
-            _hull_ring(6.4, 3.00, 2.72, 0.56, -1.22),
-            _hull_ring(1.0, 3.28, 3.22, 0.46, -1.20),
-            _hull_ring(-6.0, 3.30, 3.24, 0.44, -1.18),
-            _hull_ring(-11.0, 3.02, 2.86, 0.40, -1.12),
-            _hull_ring(-13.9, 2.55, 2.30, 0.34, -1.00),
-        ],
-        hull,
-    ).reparent_to(root)
-    # Main deck, and the knuckle strake running the length of the hull.
-    make_box((5.9, 21.5, 0.20), deck, (0, -0.6, 0.50)).reparent_to(root)
-    for side in (-1, 1):
-        make_box((0.16, 19.0, 0.30), _shade(hull, 0.82), (side * 3.24, -1.0, 0.02)).reparent_to(root)
-    # Breakwater and forecastle bulwark.
-    make_box((4.4, 0.18, 0.42), deck, (0, 9.3, 0.72)).reparent_to(root)
-
-    # Forward gun in an independently turning mount.
-    turret = NodePath("Turret")
-    turret.set_pos(0, 7.6, 0.75)
-    turret.reparent_to(root)
-    make_box((2.5, 2.8, 0.85), superstructure, (0, 0, 0.35)).reparent_to(turret)
-    make_loft(
-        [_tube_ring(1.1, 0.25, z=0.42), _tube_ring(3.3, 0.17, z=0.42)],
-        dark,
-    ).reparent_to(turret)
-
-    # Vertical launch cells, visibly arranged in the forward and aft banks of
-    # an Arleigh Burke rather than as generic tubes stuck on the deck.
-    for y, rows in ((4.0, 3), (-5.2, 4)):
-        for row in range(rows):
-            for x in (-1.05, 1.05):
-                make_box((0.78, 0.86, 0.32), dark, (x, y - row * 0.92, 0.82)).reparent_to(root)
-
-    # Superstructure in tapering steps, the way a real deckhouse is built up.
-    make_loft(
-        [
-            _hull_ring(2.60, 2.05, 2.25, 2.62, 0.55),
-            _hull_ring(0.20, 2.18, 2.38, 2.72, 0.55),
-            _hull_ring(-2.60, 2.05, 2.25, 2.58, 0.55),
+            _hull_ring(y, w * 0.97, w * 0.97, z_deck + 0.02, z_deck - 0.10)
+            for y, w, _, _, z_deck, _, _ in stations
         ],
         deck,
     ).reparent_to(root)
-    # Bridge, angled back, with a dark window band right round the front.
+    # Deck edge and the breakwater across the forecastle.
+    for side in (-1, 1):
+        make_box((0.09, 15.0, 0.16), _shade(hull, 1.18),
+                 (side * 2.06, -1.0, 0.62)).reparent_to(root)
+    make_box((2.9, 0.16, 0.34), deck, (0, 12.4, 0.98)).reparent_to(root)
+
+    # Forward gun in an independently turning mount, on a raised bandstand.
+    make_loft(
+        [_hull_ring(12.9, 1.35, 1.45, 0.92, 0.60), _hull_ring(10.1, 1.55, 1.65, 0.92, 0.72)],
+        deck,
+    ).reparent_to(root)
+    turret = NodePath("Turret")
+    turret.set_pos(0, 11.5, 0.92)
+    turret.reparent_to(root)
+    # Faceted shield: sloped front plate, like the OTO Melara of the reference.
     make_loft(
         [
-            _hull_ring(2.35, 1.55, 1.80, 4.05, 2.60),
-            _hull_ring(0.90, 1.72, 1.92, 4.15, 2.60),
-            _hull_ring(-0.60, 1.60, 1.80, 4.00, 2.60),
+            _hull_ring(-1.45, 1.10, 1.18, 1.30, 0.02),
+            _hull_ring(0.35, 1.04, 1.14, 1.42, 0.02),
+            _hull_ring(1.30, 0.68, 0.86, 1.02, 0.04),
+            _hull_ring(1.72, 0.34, 0.48, 0.86, 0.06),
+        ],
+        superstructure,
+    ).reparent_to(turret)
+    # Barrel with the fume extractor bulge that makes a naval gun recognisable.
+    make_loft(
+        [_tube_ring(1.30, 0.19, z=0.66), _tube_ring(3.60, 0.12, z=0.66)],
+        dark,
+    ).reparent_to(turret)
+    make_loft(
+        [_tube_ring(1.95, 0.26, z=0.66), _tube_ring(2.55, 0.26, z=0.66)],
+        _shade(dark, 1.5),
+    ).reparent_to(turret)
+
+    # Vertical launch cells, forward and aft: flush hatches in a low armoured
+    # deck module, the way a Mk 41 farm actually sits. They only needed to be
+    # big enough to pick out — the first version was a 45 cm dark square that
+    # vanished at any distance.
+    for y, rows, z_deck in ((8.4, 4, 0.87), (-9.10, 2, 0.58)):
+        depth = rows * 0.66
+        make_loft(
+            [
+                _hull_ring(y + 0.40, 1.02, 1.08, z_deck + 0.15, z_deck - 0.16),
+                _hull_ring(y - depth, 1.02, 1.08, z_deck + 0.15, z_deck - 0.16),
+            ],
+            _shade(deck, 0.92),
+        ).reparent_to(root)
+        for row in range(rows):
+            cy = y - row * 0.66
+            for x in (-0.48, 0.48):
+                # Hatch leaf, sitting in its dark surround.
+                make_box((0.46, 0.30, 0.02), dark, (x, cy, 0.16 + z_deck)).reparent_to(root)
+                make_box((0.40, 0.25, 0.03), _shade(superstructure, 0.88),
+                         (x, cy, 0.17 + z_deck)).reparent_to(root)
+            make_box((1.02, 0.025, 0.025), dark, (0, cy + 0.33, 0.17 + z_deck)).reparent_to(root)
+
+    # Anti-ship missile canisters in raked deck boxes, abaft the funnels. The
+    # single most recognisable "this thing launches missiles" feature there is,
+    # and the reason a corvette reads as armed from a kilometre away.
+    for side in (-1, 1):
+        battery = NodePath("MissileBattery")
+        battery.set_pos(side * 0.92, -7.00, 2.16)
+        battery.set_p(14.0)
+        battery.set_h(side * 18.0)
+        battery.reparent_to(root)
+        make_box((0.46, 0.86, 0.10), _shade(superstructure, 0.8), (0, 0.10, -0.10)).reparent_to(battery)
+        for cx in (-0.21, 0.21):
+            for cz in (0.0, 0.43):
+                make_loft(
+                    [_tube_ring(-0.62, 0.195, x=cx, z=cz), _tube_ring(0.86, 0.195, x=cx, z=cz)],
+                    _shade(superstructure, 0.92),
+                ).reparent_to(battery)
+                # Frangible cover on the muzzle end, and a banding strap.
+                make_loft(
+                    [_tube_ring(0.86, 0.175, x=cx, z=cz), _tube_ring(0.92, 0.175, x=cx, z=cz)],
+                    (0.30, 0.28, 0.26, 1.0),
+                ).reparent_to(battery)
+                make_loft(
+                    [_tube_ring(0.10, 0.21, x=cx, z=cz), _tube_ring(0.18, 0.21, x=cx, z=cz)],
+                    _shade(superstructure, 0.72),
+                ).reparent_to(battery)
+
+    # Superstructure as ONE continuous stepped block from frame 8 to frame -9.
+    # Previously it was three separate lumps with gaps of open deck between
+    # them, which is what made the ship look assembled out of spare crates.
+    make_loft(
+        [
+            _hull_ring(8.20, 1.30, 1.42, 2.05, 0.58),
+            _hull_ring(6.20, 1.62, 1.74, 2.15, 0.56),
+            _hull_ring(-4.00, 1.66, 1.78, 2.15, 0.56),
+            _hull_ring(-6.60, 1.58, 1.70, 2.10, 0.56),
+            _hull_ring(-8.20, 1.44, 1.54, 2.00, 0.56),
+        ],
+        deck,
+    ).reparent_to(root)
+    # 01 level, then the bridge on top of it: each tier steps inboard.
+    make_loft(
+        [
+            _hull_ring(6.40, 1.12, 1.26, 3.10, 2.05),
+            _hull_ring(4.60, 1.34, 1.46, 3.16, 2.05),
+            _hull_ring(-3.60, 1.36, 1.48, 3.16, 2.05),
+            _hull_ring(-6.60, 1.20, 1.32, 3.02, 2.05),
         ],
         superstructure,
     ).reparent_to(root)
-    make_box((3.30, 0.14, 0.52), dark, (0, 2.38, 3.72)).reparent_to(root)
-    for side in (-1, 1):
-        make_box((0.14, 2.6, 0.52), dark, (side * 1.72, 1.15, 3.72)).reparent_to(root)
-    # Boat deck, funnel house and the twin uptakes.
+    # Bridge tower. Deliberately narrower and a good deal taller than the tier
+    # below: the reference ships read as a long low hull with one tall block
+    # forward, and when every tier was the same width the whole deckhouse
+    # flattened into a single slab.
     make_loft(
         [
-            _hull_ring(-3.30, 1.80, 2.00, 2.95, 0.55),
-            _hull_ring(-6.40, 1.70, 1.90, 2.80, 0.55),
+            _hull_ring(5.70, 0.86, 1.00, 4.30, 3.16),
+            _hull_ring(4.40, 1.08, 1.18, 4.36, 3.16),
+            _hull_ring(2.30, 1.04, 1.14, 4.30, 3.16),
         ],
-        deck,
+        superstructure,
     ).reparent_to(root)
+    # Pilot house on top, stepped in again, with its own roof.
+    make_loft(
+        [
+            _hull_ring(5.20, 0.72, 0.84, 5.28, 4.36),
+            _hull_ring(4.30, 0.90, 0.98, 5.32, 4.36),
+            _hull_ring(3.00, 0.86, 0.94, 5.26, 4.36),
+        ],
+        _shade(superstructure, 0.94),
+    ).reparent_to(root)
+    # Wraparound bridge windows: front band plus both wings, on both levels.
+    for y_front, x_wing, y_wing, z, span in ((5.66, 1.02, 4.00, 3.92, 0.90),
+                                             (5.16, 0.86, 4.10, 4.92, 0.76)):
+        make_box((span, 0.10, 0.32), dark, (0, y_front, z)).reparent_to(root)
+        for side in (-1, 1):
+            make_box((0.10, 1.30, 0.32), dark, (side * x_wing, y_wing, z)).reparent_to(root)
     for side in (-1, 1):
-        funnel = make_loft(
+        # Bridge wing, overhanging the tier below the way real ones do.
+        make_box((0.40, 0.32, 0.06), deck, (side * 1.38, 4.40, 4.38)).reparent_to(root)
+        make_box((0.05, 0.32, 0.20), dark, (side * 1.74, 4.40, 4.58)).reparent_to(root)
+
+    # Deckhouse fittings. Without these the 17-unit-long block reads as one
+    # smooth slab; the reference ships are covered in small hard edges.
+    for side in (-1, 1):
+        # Life-raft canisters in their racks along the side.
+        for y in (7.20, 5.10, -2.20, -4.60, -8.30):
+            make_loft(
+                [_tube_ring(y - 0.28, 0.16, x=side * 1.72, z=1.35),
+                 _tube_ring(y + 0.28, 0.16, x=side * 1.72, z=1.35)],
+                (0.72, 0.73, 0.70, 1.0),
+            ).reparent_to(root)
+        # Watertight doors and the outboard walkway they open onto.
+        for y in (6.40, 0.60, -6.20):
+            make_box((0.05, 0.24, 0.36), _shade(dark, 1.6),
+                     (side * 1.68, y, 0.94)).reparent_to(root)
+        make_box((0.10, 8.60, 0.05), _shade(deck, 1.1),
+                 (side * 1.76, -0.60, 0.60)).reparent_to(root)
+        # Boat davit and the RHIB it carries, amidships.
+        make_box((0.06, 0.06, 0.62), _shade(superstructure, 0.8),
+                 (side * 1.60, -1.30, 2.46)).reparent_to(root)
+        rhib = make_loft(
             [
-                _hull_ring(-4.10, 0.52, 0.60, 4.30, 2.90),
-                _hull_ring(-5.30, 0.46, 0.54, 4.10, 2.90),
+                _hull_ring(-2.30, 0.16, 0.10, 2.34, 2.10),
+                _hull_ring(-1.10, 0.22, 0.14, 2.36, 2.06),
+                _hull_ring(-0.20, 0.10, 0.06, 2.32, 2.14),
+            ],
+            (0.24, 0.26, 0.28, 1.0),
+        )
+        rhib.set_x(side * 1.62)
+        rhib.reparent_to(root)
+    # Twin raked uptakes between the masts.
+    for y in (-0.30, -3.40):
+        make_loft(
+            [
+                _hull_ring(y + 0.68, 0.62, 0.70, 5.05, 3.10),
+                _hull_ring(y - 0.68, 0.52, 0.62, 5.35, 3.10),
             ],
             superstructure,
-        )
-        funnel.set_x(side * 1.05)
-        funnel.reparent_to(root)
-        make_box((0.62, 0.72, 0.16), dark, (side * 1.05, -4.6, 4.36)).reparent_to(root)
+        ).reparent_to(root)
+        # Dark uptake cap, recessed inside the casing rim.
+        make_box((0.54, 0.60, 0.06), dark, (0, y - 0.14, 5.22)).reparent_to(root)
+        make_box((0.60, 0.66, 0.05), _shade(superstructure, 1.1),
+                 (0, y - 0.14, 5.28)).reparent_to(root)
 
-    # Lattice mast: a tapering tower with yards, a planar array on the face
-    # and the big rotating air-search antenna on top.
+    # Two masts, tall and slender. This is the other half of the silhouette:
+    # the reference ships carry a foremast abaft the bridge and a mainmast aft,
+    # both rising well clear of everything else.
+    mast_grey = _shade(superstructure, 0.62)
+    _lattice_mast(1.60, 3.16, 10.40, 0.72, 0.15, mast_grey,
+                  yards=((0.62, 1.35), (0.80, 0.92), (0.93, 0.55))).reparent_to(root)
+    _lattice_mast(-5.60, 3.02, 8.20, 0.58, 0.13, mast_grey,
+                  yards=((0.64, 1.05), (0.86, 0.62))).reparent_to(root)
+
+    # Phased-array faces on the bridge front, air-search antenna up top.
+    for face_y, face_x, heading in ((5.52, 0.0, 0.0), (4.10, 1.02, 82.0), (4.10, -1.02, -82.0)):
+        panel = make_box((0.46, 0.07, 0.46), radar, (0, 0, 0))
+        panel.set_pos(face_x, face_y, 3.40)
+        panel.set_h(heading)
+        panel.set_p(-12.0)
+        panel.reparent_to(root)
+    # Air-search antenna. Named so the battle code can turn it: a warship with
+    # a dead radar looks like a model on a shelf, and it is the one moving part
+    # visible from any distance.
+    # Platform carrying it, so the antenna is visibly borne by the mast rather
+    # than floating above it.
     make_loft(
-        [
-            _hull_ring(-1.30, 0.42, 0.46, 4.10, 4.05),
-            _hull_ring(-1.30, 0.30, 0.34, 7.10, 7.05),
-        ],
-        dark,
+        [_pod_ring(7.42, 0.44, 0.44, 1.60), _pod_ring(7.54, 0.40, 0.40, 1.60)],
+        mast_grey,
     ).reparent_to(root)
-    for z, span in ((5.05, 3.9), (6.05, 3.1)):
-        make_box((span, 0.12, 0.14), dark, (0, -1.30, z)).reparent_to(root)
-        for side in (-1, 1):
-            make_box((0.10, 0.10, 0.9), dark, (side * span * 0.45, -1.30, z + 0.45)).reparent_to(root)
-    make_box((2.30, 0.16, 1.15), radar, (0, -0.95, 5.55)).reparent_to(root)
-    rotator = make_box((3.60, 0.20, 0.55), radar, (0, 0, 0))
-    rotator.set_pos(0, -1.30, 7.45)
+    rotator = NodePath("AirSearchRadar")
+    rotator.set_pos(0, 1.60, 7.86)
     rotator.set_h(24.0)
     rotator.reparent_to(root)
-    make_box((0.12, 0.12, 1.5), dark, (0, -1.30, 8.35)).reparent_to(root)
+    make_box((1.55, 0.10, 0.30), radar, (0, 0, 0)).reparent_to(rotator)
+    # Curved backing frame, so the sweep is legible as it turns edge-on.
+    for x in (-1.30, -0.65, 0.0, 0.65, 1.30):
+        make_box((0.05, 0.16, 0.34), _shade(radar, 0.7), (x, -0.10, 0)).reparent_to(rotator)
+    make_box((0.22, 0.22, 0.14), dark, (0, 0, -0.22)).reparent_to(rotator)
+    make_box((0.66, 0.10, 0.66), radar, (0, -5.60, 7.50)).reparent_to(root)
+    # Fire-control directors with their radomes: main one on the pilot house
+    # roof, the aft one on the boat deck.
+    for y, z in ((4.20, 5.32), (-7.30, 3.02)):
+        make_box((0.30, 0.30, 0.22), superstructure, (0, y, z)).reparent_to(root)
+        make_box((0.36, 0.36, 0.34), (0.80, 0.81, 0.79, 1.0), (0, y, z + 0.28)).reparent_to(root)
 
-    # Close-in weapon station and rear helicopter deck with an H marking.
-    for x in (1.85, -1.85):
-        make_box((0.62, 0.62, 0.44), dark, (x, 0.5, 2.05)).reparent_to(root)
-        make_box((0.14, 0.95, 0.14), radar, (x, 0.88, 2.35)).reparent_to(root)
-    make_box((5.05, 5.4, 0.16), (0.28, 0.30, 0.31, 1.0), (0, -10.0, 0.78)).reparent_to(root)
+    # Close-in weapon stations: one over the bridge, two on aft sponsons. Each
+    # is a named node so the battle code can find it, and each is built at a
+    # size you can actually pick out — a Phalanx is barely a metre across in
+    # real terms, which at this scale would be a single invisible pixel.
+    # One forward over the bridge and one aft on the hangar roof, the Burke
+    # arrangement: between them they cover the whole horizon.
+    for name, x, y, z, heading in (
+        ("CiwsFwd", 0.0, 7.40, 2.15, 0.0),
+        ("CiwsAft", 0.0, -8.30, 2.00, 180.0),
+    ):
+        mount = _ciws_mount(superstructure, dark)
+        mount.set_name(name)
+        mount.set_pos(x, y, z)
+        mount.set_h(heading)
+        mount.reparent_to(root)
+        # Sponson carrying the mount clear of the deckhouse side.
+        make_box((0.44, 0.44, 0.07), deck, (x, y, z - 0.04)).reparent_to(root)
+
+    # Flight deck aft, following the hull line, with its H and a hangar door.
+    make_loft(
+        [
+            _hull_ring(-10.60, 1.96, 1.96, 0.62, 0.50),
+            _hull_ring(-13.20, 1.88, 1.88, 0.60, 0.48),
+            _hull_ring(-15.40, 1.70, 1.70, 0.58, 0.46),
+        ],
+        (0.24, 0.26, 0.27, 1.0),
+    ).reparent_to(root)
+    make_box((1.20, 0.10, 0.62), _shade(deck, 0.85), (0, -9.90, 1.20)).reparent_to(root)
     flight_mark = (0.88, 0.88, 0.82, 1.0)
-    make_box((0.18, 1.7, 0.035), flight_mark, (0, -10.0, 0.89)).reparent_to(root)
-    make_box((1.15, 0.18, 0.035), flight_mark, (0, -9.5, 0.89)).reparent_to(root)
-    make_box((1.15, 0.18, 0.035), flight_mark, (0, -10.5, 0.89)).reparent_to(root)
-    # Team recognition panels remain readable without tinting the whole hull.
-    make_box((0.18, 2.8, 0.55), color, (3.28, 1.2, 0.10)).reparent_to(root)
-    make_box((0.18, 2.8, 0.55), color, (-3.28, 1.2, 0.10)).reparent_to(root)
+    make_box((0.12, 1.05, 0.03), flight_mark, (0, -13.00, 0.64)).reparent_to(root)
+    make_box((0.72, 0.12, 0.03), flight_mark, (0, -12.30, 0.64)).reparent_to(root)
+    make_box((0.72, 0.12, 0.03), flight_mark, (0, -13.70, 0.64)).reparent_to(root)
+
+    # Team recognition panels: readable at battle range without tinting the
+    # whole hull, on the bow where the pennant number sits on a real ship.
+    for side in (-1, 1):
+        make_box((0.10, 1.90, 0.42), color, (side * 1.94, 9.60, 0.30)).reparent_to(root)
+
+    root.set_scale(scale)
     return root
 
 

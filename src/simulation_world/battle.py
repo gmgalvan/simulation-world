@@ -472,6 +472,7 @@ class Battle:
         unit.main_rotor = model.find(f"**/{self.assets.node_name(kind, 'main_rotor', 'MainRotor')}")
         unit.tail_rotor = model.find(f"**/{self.assets.node_name(kind, 'tail_rotor', 'TailRotor')}")
         unit.turret = model.find(f"**/{self.assets.node_name(kind, 'turret', 'Turret')}")
+        unit.radar = model.find("**/AirSearchRadar")
         unit.nacelles = [
             model.find(f"**/{self.assets.node_name(kind, 'nacelle_left', 'NacelleLeft')}"),
             model.find(f"**/{self.assets.node_name(kind, 'nacelle_right', 'NacelleRight')}"),
@@ -914,9 +915,8 @@ class Battle:
             return
 
         distance, missile = min(incoming, key=lambda item: item[0])
-        muzzle = unit.naval_ciws_muzzle()
-        self.effects.tracer(muzzle, missile.position, TEAM_COLORS[unit.team])
-        self.effects.muzzle_flash(muzzle, scale=0.34)
+        muzzle = unit.naval_ciws_muzzle(missile.position)
+        self.effects.ciws_burst(muzzle, missile.position, TEAM_COLORS[unit.team])
         self.stats.shot(unit.kind, unit.team)
         unit.ciws_cooldown = CIWS_DEFENSIVE_PERIOD
         # Do not let the same mount attack a nearby unit in this exact burst.
@@ -1015,6 +1015,15 @@ class Battle:
             self.effects.launch_missile(
                 unit, target, STRATEGIC_STRIKE, rack_offset=offsets[index]
             )
+            # Throw the tube lid open and drag a column of sea up behind the
+            # round: a cruise missile leaving a submerged boat is the single
+            # most spectacular thing in the simulation and it used to be a
+            # puff of grey smoke in mid-air.
+            mouth = self.effects.open_launch_hatch(unit, index)
+            if mouth is None:
+                mouth = unit.muzzle()
+            self.effects.breach_column(mouth, scale=2.2)
+            self.effects.launch_plume(mouth, scale=1.9)
         self.stats.salvo(unit.kind, unit.team, len(selected))
         for _ in selected:
             self.stats.missile(unit.kind, unit.team, "misil de crucero")
@@ -1079,6 +1088,10 @@ class Battle:
             # for wheeled/tracked units and makes a ship pitch into the seabed.
             unit.model_np.set_p(0)
             unit.model_np.set_r(0)
+            # Air-search radar turns at a realistic 7 rpm whatever else the
+            # ship is doing, and stops when the ship dies.
+            if not unit.radar.is_empty():
+                unit.radar.set_h(unit.radar.get_h() + 42.0 * dt)
             if not unit.turret.is_empty() and unit.target is not None:
                 unit.turret.look_at(self.render, unit.target.position)
                 unit.turret.set_p(0)
@@ -1169,15 +1182,14 @@ class Battle:
             if distance <= 82.0:
                 unit.cooldown = 0.16 * self.rng.uniform(0.85, 1.15)
                 unit.ciws_cooldown = max(unit.ciws_cooldown, unit.cooldown)
-                muzzle = unit.naval_ciws_muzzle()
+                muzzle = unit.naval_ciws_muzzle(target.position)
                 spread = 2.0 + distance * 0.025
                 aim = target.position + Vec3(
                     self.rng.uniform(-spread, spread),
                     self.rng.uniform(-spread, spread),
                     self.rng.uniform(-spread, spread),
                 )
-                self.effects.tracer(muzzle, aim, TEAM_COLORS[unit.team])
-                self.effects.muzzle_flash(muzzle, scale=0.34)
+                self.effects.ciws_burst(muzzle, aim, TEAM_COLORS[unit.team])
                 if self.rng.random() < 0.72:
                     self._apply_damage(unit, target, 11.0 * self.rng.uniform(0.75, 1.2))
                 return
@@ -1197,7 +1209,8 @@ class Battle:
                     flat.normalize()
                 direction = flat * math.cos(pitch) + Vec3(0, 0, math.sin(pitch))
                 direction.normalize()
-                self.effects.muzzle_flash(muzzle, scale=0.9)
+                self.effects.muzzle_flash(muzzle, scale=1.9)
+                self.effects.smoke_puff(muzzle, scale=1.5)
                 self.effects.shell(unit, muzzle, direction, 235.0, 58.0)
                 return
             if target.kind in FLYING:
@@ -1208,6 +1221,7 @@ class Battle:
                 else NAVAL_STRIKE
             )
             self.effects.launch_missile(unit, target, missile_spec)
+            self.effects.launch_plume(unit.muzzle(), scale=1.7)
             self.stats.missile(unit.kind, unit.team, missile_spec.weapon_name)
             return
 

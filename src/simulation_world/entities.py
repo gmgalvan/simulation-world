@@ -163,14 +163,14 @@ SAM = UnitSpec(
 # cells can engage aircraft and land targets long before a naval gun could.
 DESTROYER = UnitSpec(
     mass=8_500.0,
-    half_extents=Vec3(3.4, 11.5, 2.3),
+    half_extents=Vec3(4.5, 35.0, 4.9),
     max_health=360.0,
     cruise_speed=12.0,
     turn_rate=0.48,
     attack_range=1_200.0,
     damage=135.0,
     fire_period=4.2,
-    model_length=28.0,
+    model_length=70.0,
     stand_off=0.55,
     drive_gain=3.2,
 )
@@ -180,14 +180,14 @@ DESTROYER = UnitSpec(
 # weapon of unlimited reach made much less sense.
 SUBMARINE = UnitSpec(
     mass=7_200.0,
-    half_extents=Vec3(2.6, 13.0, 2.0),
+    half_extents=Vec3(3.1, 26.0, 2.0),
     max_health=240.0,
     cruise_speed=7.0,
     turn_rate=0.35,
     attack_range=520.0,
     damage=70.0,
     fire_period=9.0,
-    model_length=26.0,
+    model_length=53.0,
     stand_off=0.6,
     drive_gain=3.0,
 )
@@ -344,17 +344,28 @@ class Unit:
             "rocket": (1.88, 0.72),
             "jet": (6.5, -0.8),   # off the rails, below the wing
             "sam": (1.6, 2.4),    # off the launcher rack on top
-            "destroyer": (8.8, 3.6),  # forward VLS bank above the deck
+            "destroyer": (18.5, 2.0),  # forward VLS bank above the deck
         }.get(self.kind, (4.2, 1.1))
         return self.position + self.forward * offset + Vec3(0, 0, height)
 
+    # The three mount points below are read off the destroyer placeholder,
+    # whose geometry is authored at 1/2.15 scale. Keep them in step with
+    # `build_placeholder_destroyer` or the muzzle flashes drift off the model.
     def naval_gun_muzzle(self) -> Point3:
         """Muzzle of the 127 mm bow gun on the destroyer placeholder."""
-        return self.position + self.forward * 10.8 + Vec3(0, 0, 1.5)
+        return self.position + self.forward * 32.5 + Vec3(0, 0, 3.4)
 
-    def naval_ciws_muzzle(self) -> Point3:
-        """Forward close-in weapon station, beside the bridge."""
-        return self.position + self.forward * 4.8 + Vec3(1.8, 0, 2.3)
+    def naval_ciws_muzzle(self, toward: Point3 | None = None) -> Point3:
+        """Whichever close-in mount bears on `toward`.
+
+        The ship carries one station over the bridge and two on aft sponsons.
+        Firing everything from the forward mount looked wrong for a missile
+        coming in over the stern, which is the case the guns exist for.
+        """
+        offset = 18.6
+        if toward is not None and self.forward.dot(toward - self.position) < 0.0:
+            offset = -20.6
+        return self.position + self.forward * offset + Vec3(0, 0, 6.9)
 
     def can_bear(self, target: Unit) -> bool:
         """Fixed-wing aircraft only shoot at what is lined up ahead of them.

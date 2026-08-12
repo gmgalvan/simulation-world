@@ -31,8 +31,8 @@ def build_argparser() -> argparse.ArgumentParser:
         metavar="BOOL",
         help="Activa la ciudad defendida (true por defecto; usa --city=false para quitarla).",
     )
-    parser.add_argument("--n-heli", type=int, default=3, help="Helicópteros por equipo.")
-    parser.add_argument("--n-tanks", type=int, default=4, help="Tanques por equipo.")
+    parser.add_argument("--n-heli", type=int, default=4, help="Helicópteros por equipo.")
+    parser.add_argument("--n-tanks", type=int, default=6, help="Tanques por equipo.")
     parser.add_argument(
         "--n-submarines",
         type=int,
@@ -48,7 +48,7 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-jets",
         type=int,
-        default=15,
+        default=8,
         help="Cazas F-35 por equipo. No pueden quedarse quietos: hacen pasadas de ataque.",
     )
     parser.add_argument(
@@ -63,13 +63,13 @@ def build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--n-rockets",
         type=int,
-        default=3,
+        default=5,
         help="Equipos de RPG por equipo. Pocos, pero son lo único a pie que revienta un tanque.",
     )
     parser.add_argument(
         "--n-osprey",
         type=int,
-        default=3,
+        default=2,
         help="Convertiplanos (tiltrotor tipo V-22) por equipo. Rápidos y duros, poco armados.",
     )
     parser.add_argument("--relief", type=float, default=46.0, help="Altura máxima del relieve.")
@@ -84,7 +84,7 @@ def build_argparser() -> argparse.ArgumentParser:
         type=float,
         default=420.0,
         metavar="M",
-        help="Radio sin ríos ni lagos alrededor del campo de batalla (0 para permitirlos en medio).",
+        help="Radio sin ríos ni lagos alrededor del campo de batalla (0 peara permitirlos en medio).",
     )
     parser.add_argument(
         "--view-chunks",

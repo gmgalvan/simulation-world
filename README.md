@@ -16,7 +16,7 @@ contrarrestan entre sí:
 | 🚁 | Helicóptero Mi-24 | Anticarro volador |
 | 🛩️ | Convertiplano V-22 | Rápido y duro, poco armado |
 | ✈️ | Caza F-35 | Vuela alto y ataca con misiles guiados |
-| 🚢 | Destructor | Misiles de 1200 m aire/tierra, y sonar antisubmarino |
+| 🚢 | Destructor | 70 m de eslora. Selección automática de arma según distancia: CIWS, cañón de 127 mm o misiles |
 | 🌊 | Submarino | Sumergido, torpedos y salva de crucero de alcance ilimitado |
 
 ## Qué hace

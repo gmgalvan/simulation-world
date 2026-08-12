@@ -523,8 +523,13 @@ class SimulationApp(ShowBase):
             "jet": (7.65, 0.72),
             "helicopter": (4.78, 0.62),
             "osprey": (7.18, 0.42),
-            "destroyer": (1.4, 4.35),
-            "submarine": (1.2, 2.65),
+            # Naval views belong on the bridge, not at the centre of the hull.
+            # These offsets are measured off the placeholders: the destroyer's
+            # pilot-house glazing sits 11.2 m forward and 10.6 m up, and the
+            # submarine's is on top of the sail. Held at the hull centre the
+            # camera ended up buried inside the deckhouse looking at a wall.
+            "destroyer": (12.2, 10.3),
+            "submarine": (5.5, 6.6),
         }.get(unit.kind, (0.5, max(0.8, unit.spec.half_extents.z * 0.8)))
         eye = Point3(unit.position + forward * forward_offset + Vec3(0, 0, eye_height))
         view_direction = Vec3(forward)
@@ -538,6 +543,12 @@ class SimulationApp(ShowBase):
                 view_direction += Vec3(0, 0, 0.11)
             if view_direction.length_squared() > 1e-9:
                 view_direction.normalize()
+        elif unit.kind in ("destroyer", "submarine"):
+            # From the bridge the sightline has to drop a little or the shot is
+            # pure horizon: the foredeck, the gun and the launch cells all sit
+            # well below eye level on a hull this long.
+            view_direction.z = -0.20
+            view_direction.normalize()
         elif unit.kind == "jet":
             # The rigid body is yaw-only for stability, but vertical velocity
             # is the aircraft's real climb angle. Reflect it in the pilot view

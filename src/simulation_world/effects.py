@@ -80,6 +80,41 @@ class Shell:
         self.trail = trail
 
 
+class _HatchSwing:
+    """A launch-tube lid thrown open, held, then dropped shut again.
+
+    Kept as its own timed object rather than a tween on the model, because the
+    lid belongs to a unit that may be destroyed mid-cycle; when that happens
+    the NodePath goes empty and the swing simply stops updating.
+    """
+
+    __slots__ = ("np", "elapsed", "open_for", "hold_for", "shut_for", "angle")
+
+    def __init__(self, np: NodePath, angle: float = 104.0) -> None:
+        self.np = np
+        self.elapsed = 0.0
+        self.open_for = 0.55
+        self.hold_for = 3.4
+        self.shut_for = 1.5
+        self.angle = angle
+
+    @property
+    def total(self) -> float:
+        return self.open_for + self.hold_for + self.shut_for
+
+    def fraction(self) -> float:
+        """How far open the lid is, 0 shut to 1 fully back."""
+        t = self.elapsed
+        if t < self.open_for:
+            # Fast at first, easing as the ram runs out of travel.
+            x = t / self.open_for
+            return 1.0 - (1.0 - x) * (1.0 - x)
+        if t < self.open_for + self.hold_for:
+            return 1.0
+        x = (t - self.open_for - self.hold_for) / self.shut_for
+        return max(0.0, 1.0 - x * x)
+
+
 class Effects:
     def __init__(self, render: NodePath, world, terrain) -> None:
         self.render = render
@@ -93,6 +128,7 @@ class Effects:
         self.smoke: list[_Timed] = []
         self.splatters: list[Splatter] = []
         self.missiles: list[Missile] = []
+        self.hatches: list[_HatchSwing] = []
 
     # ------------------------------------------------------------------
     # Spawning
@@ -120,6 +156,37 @@ class Effects:
         np.set_attrib(ColorBlendAttrib.make(ColorBlendAttrib.M_add))
         np.set_light_off()
         self.tracers.append(_Timed(np, 0.07))
+
+    def ciws_burst(self, start: Point3, end: Point3, color) -> None:
+        """The wall of tracer a close-in gun puts up on one trigger pull.
+
+        A Phalanx fires about seventy rounds a second, so what you see is a
+        continuous rope of light, not a bullet. Drawing a single thin tracer
+        per burst — as this used to — made the ship's last-ditch defence
+        invisible at exactly the moment it matters.
+        """
+        direction = end - start
+        spread = max(0.9, direction.length() * 0.02)
+        for i in range(7):
+            aim = Point3(
+                end.x + random.uniform(-spread, spread),
+                end.y + random.uniform(-spread, spread),
+                end.z + random.uniform(-spread, spread),
+            )
+            segs = LineSegs()
+            # Thick and hot at the core, thinner strands around it.
+            segs.set_thickness(4.6 if i == 0 else 2.0)
+            segs.set_color(Vec4(1.0, 0.86, 0.42, 1.0) if i == 0 else Vec4(*color))
+            segs.move_to(start)
+            segs.draw_to(aim)
+            np = self.root.attach_new_node(segs.create())
+            np.set_transparency(TransparencyAttrib.M_alpha)
+            np.set_attrib(ColorBlendAttrib.make(ColorBlendAttrib.M_add))
+            np.set_light_off()
+            np.set_bin("fixed", 40)
+            np.set_depth_write(False)
+            self.tracers.append(_Timed(np, random.uniform(0.10, 0.20)))
+        self.muzzle_flash(start, scale=1.15)
 
     def explosion(self, position: Point3, scale: float = 1.0, debris_count: int = 6) -> None:
         root = self.root.attach_new_node("fireball")
@@ -206,6 +273,96 @@ class Effects:
             pieces.append((piece, velocity))
 
         self.splatters.append(Splatter(root, random.uniform(0.9, 1.4), pieces))
+
+    def launch_plume(self, position: Point3, scale: float = 1.0) -> None:
+        """Efflux boiling off the deck as a cell fires.
+
+        The single most recognisable thing a missile ship does, and the piece
+        that was missing: launches were silent puffs of nothing.
+        """
+        for _ in range(9):
+            size = scale * random.uniform(0.9, 2.1)
+            shade = random.uniform(0.66, 0.88)
+            puff = make_box((size, size, size), (shade, shade, shade * 0.98, 0.62))
+            puff.reparent_to(self.root)
+            puff.set_pos(
+                position.x + random.uniform(-1.4, 1.4) * scale,
+                position.y + random.uniform(-1.4, 1.4) * scale,
+                position.z + random.uniform(-0.6, 1.2) * scale,
+            )
+            puff.set_hpr(random.uniform(0, 360), random.uniform(0, 360), 0)
+            puff.set_transparency(TransparencyAttrib.M_alpha)
+            puff.set_light_off()
+            puff.set_depth_write(False)
+            self.smoke.append(_Timed(puff, random.uniform(1.4, 2.4)))
+        # A brief flash at the cell mouth.
+        flash = make_box((scale * 1.5, scale * 1.5, scale * 1.5), (1.0, 0.82, 0.42, 1.0))
+        flash.reparent_to(self.root)
+        flash.set_pos(position)
+        flash.set_transparency(TransparencyAttrib.M_alpha)
+        flash.set_attrib(ColorBlendAttrib.make(ColorBlendAttrib.M_add))
+        flash.set_light_off()
+        self.tracers.append(_Timed(flash, 0.16))
+
+    def open_launch_hatch(self, unit, index: int) -> Point3 | None:
+        """Throw open one of a submarine's launch-tube lids.
+
+        Returns the world position of the open tube mouth so the caller can
+        put the missile where the hole actually is, or None if this model has
+        no hatch by that name.
+        """
+        side = "S" if index % 2 else "P"
+        hatch = unit.model_np.find(f"**/LaunchHatch{index // 2}{side}")
+        if hatch.is_empty():
+            return None
+        hinge = hatch.find("**/Hinge")
+        if not hinge.is_empty():
+            self.hatches.append(_HatchSwing(hinge))
+        return hatch.get_pos(self.render)
+
+    def breach_column(self, position: Point3, scale: float = 1.0) -> None:
+        """The wall of white water a missile drags up as it leaves the sea.
+
+        This is the moment that sells a submarine launch: without it a missile
+        simply materialised above the waves with nothing to show it had come
+        from underneath.
+        """
+        # The column itself: a stack of foam slabs, widest at the base.
+        for i in range(7):
+            height = i / 6.0
+            width = scale * (1.5 - height * 0.95) * random.uniform(0.8, 1.15)
+            slab = make_box(
+                (width, width, scale * 0.55),
+                (0.92, 0.95, 0.97, 0.62 - height * 0.22),
+            )
+            slab.reparent_to(self.root)
+            slab.set_pos(
+                position.x + random.uniform(-0.4, 0.4) * scale,
+                position.y + random.uniform(-0.4, 0.4) * scale,
+                position.z + height * scale * 4.2,
+            )
+            slab.set_h(random.uniform(0, 360))
+            slab.set_transparency(TransparencyAttrib.M_alpha)
+            slab.set_light_off()
+            slab.set_depth_write(False)
+            self.smoke.append(_Timed(slab, random.uniform(0.9, 1.6)))
+        # Spray thrown outwards off the base, flatter and shorter-lived.
+        for _ in range(10):
+            drop = make_box(
+                (scale * 0.3, scale * 0.3, scale * 0.22), (0.97, 0.99, 1.0, 0.75)
+            )
+            drop.reparent_to(self.root)
+            angle = random.uniform(0, math.tau)
+            reach = random.uniform(0.9, 2.6) * scale
+            drop.set_pos(
+                position.x + math.cos(angle) * reach,
+                position.y + math.sin(angle) * reach,
+                position.z + random.uniform(0.1, 1.3) * scale,
+            )
+            drop.set_transparency(TransparencyAttrib.M_alpha)
+            drop.set_light_off()
+            drop.set_depth_write(False)
+            self.smoke.append(_Timed(drop, random.uniform(0.5, 1.0)))
 
     def wake(self, position: Point3, scale: float = 1.0) -> None:
         """Foam on the surface above a running torpedo."""
@@ -453,6 +610,17 @@ class Effects:
         self.shells = alive
 
     def _update_timed(self, dt: float) -> None:
+        keep_hatches = []
+        for swing in self.hatches:
+            swing.elapsed += dt
+            if swing.elapsed >= swing.total or swing.np.is_empty():
+                if not swing.np.is_empty():
+                    swing.np.set_p(0.0)
+                continue
+            swing.np.set_p(-swing.angle * swing.fraction())
+            keep_hatches.append(swing)
+        self.hatches = keep_hatches
+
         for collection in (self.tracers, self.smoke):
             keep = []
             for item in collection:
