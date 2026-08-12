@@ -798,26 +798,15 @@ class Battle:
 
     def _manual_rifle_target(self, unit: Unit):
         """Return the nearest legal target inside a narrow forward aim cone."""
-        military = [
-            other
-            for other in self.units
-            if other.alive and other.team != unit.team
-        ]
-        candidates = military
-        if (
-            not military
-            and self.city is not None
-            and self.city.defending_team != unit.team
-        ):
-            candidates = self.city.targets
-
         muzzle = unit.muzzle()
         forward = Vec3(unit.forward)
         forward.normalize()
         best = None
         best_score = float("inf")
-        for target in candidates:
+        for target in self._manual_combat_candidates(unit):
             if not target.alive or target.team == unit.team:
+                continue
+            if not self._can_detect(unit, target):
                 continue
             delta = target.position - muzzle
             distance = delta.length()
@@ -835,6 +824,74 @@ class Battle:
             if score < best_score:
                 best_score, best = score, target
         return best
+
+    def manual_jet_fire(self, unit: Unit, target=None) -> bool:
+        """Launch the controlled jet's guided missile when it has a lock."""
+        if (
+            unit.kind != "jet"
+            or not unit.alive
+            or not unit.manual_controlled
+            or unit.cooldown > 0.0
+        ):
+            return False
+        target = target or self.manual_jet_target(unit)
+        if target is None:
+            return False
+        self._fire(unit, target)
+        return True
+
+    def manual_jet_target(self, unit: Unit):
+        """Acquire a target inside the same forward cone used by jet AI."""
+        forward = Vec3(unit.forward.x, unit.forward.y, 0.0)
+        if forward.length_squared() <= 1e-9:
+            return None
+        forward.normalize()
+        best = None
+        best_score = float("inf")
+        for target in self._manual_combat_candidates(unit):
+            if not target.alive or target.team == unit.team:
+                continue
+            if not self._can_detect(unit, target):
+                continue
+            delta = target.position - unit.position
+            distance = delta.length()
+            flat = Vec3(delta.x, delta.y, 0.0)
+            if (
+                distance <= 1e-6
+                or distance > unit.spec.attack_range
+                or flat.length_squared() <= 1e-9
+            ):
+                continue
+            flat.normalize()
+            alignment = forward.dot(flat)
+            if alignment < 0.86 or not self._has_line_of_sight(unit, target):
+                continue
+            score = (
+                (1.0 - alignment) * 240.0
+                + distance
+                * PREFERENCE.get(
+                    (unit.kind, target.kind), CITY_PREFERENCE.get(target.kind, 1.0)
+                )
+            )
+            if score < best_score:
+                best_score, best = score, target
+        return best
+
+    def _manual_combat_candidates(self, unit: Unit):
+        """Respect the simulation's military-first rule for manual fire too."""
+        military = [
+            other
+            for other in self.units
+            if other.alive and other.team != unit.team
+        ]
+        if military:
+            return military
+        if (
+            self.city is not None
+            and self.city.defending_team != unit.team
+        ):
+            return self.city.targets
+        return []
 
     def _update_ciws_defense(self, unit: Unit, dt: float) -> None:
         """Engage an airborne enemy missile currently homing on this ship."""

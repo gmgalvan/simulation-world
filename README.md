@@ -198,6 +198,17 @@ central. `T` devuelve la unidad a la IA. Esta opción no se ofrece al equipo RPG
 ni a vehículos. Si el fusilero cae, el control se libera automáticamente; sus
 disparos siguen usando la cadencia, precisión, daño y estadísticas normales.
 
+**Control directo del caza.** Selecciona un **caza F-35** vivo y pulsa `T`.
+`W/S` aumentan o reducen potencia, `A/D` hacen virar, `E` o `↑` ordenan ascenso
+y `Q` o `↓` descenso. El HUD muestra la altura actual sobre el terreno. El
+avión conserva una velocidad mínima, sustentación y protección
+básica contra el terreno: no puede frenar en el aire ni comportarse como un
+helicóptero. El clic izquierdo lanza su misil guiado únicamente si existe un
+blanco enemigo dentro del alcance y del cono frontal; respeta la recarga y
+queda registrado en las estadísticas normales. El recuadro de adquisición es
+blanco sin bloqueo, amarillo durante la recarga y verde cuando el misil está
+listo para lanzarse. `T` devuelve el caza a la IA.
+
 **Cámara.** Se maneja con el ratón: **arrastra** para girar, **rueda** para
 zoom. El teclado sigue funcionando, y en modo libre `WASD` mueve. Se usan
 coordenadas absolutas de ratón en vez de captura relativa del puntero, que es
@@ -354,8 +365,9 @@ uv run main.py
 | `I` | **Inspeccionar una unidad de cerca** (entrar/salir) |
 | `TAB` / `SHIFT+TAB` | Unidad siguiente / anterior mientras inspeccionas |
 | `V` | Ver de frente desde la unidad seleccionada / volver al inspector |
-| `T` | Tomar / soltar el control del fusilero seleccionado |
+| `T` | Tomar / soltar el control del fusilero o caza seleccionado |
 | `W/S`, `A/D`, clic izquierdo | Caminar, girar y disparar al controlar un fusilero |
+| `W/S`, `A/D`, `Q/E`, clic izquierdo | Potencia, viraje, altura y misil del caza controlado |
 | Arrastrar ratón | Girar la cámara |
 | Rueda | Zoom (o avanzar, en modo libre) |
 | `C` | Cambiar cámara: órbita → persecución → cenital → **libre** |
@@ -489,7 +501,7 @@ src/simulation_world/
   entities.py                   # Unit: cuerpo rígido + modelo de vuelo/conducción
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
-  player_control.py             # control manual opcional del fusilero
+  player_control.py             # control manual opcional de fusilero y caza
   app.py                        # ventana, luces, cámara, HUD, bucle principal
   stats.py                      # recuento e informes TXT/JSON de la batalla
   simulation.py                 # CLI

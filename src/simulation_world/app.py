@@ -13,7 +13,9 @@ from panda3d.core import (
     CardMaker,
     DirectionalLight,
     Fog,
+    LineSegs,
     NodePath,
+    Point2,
     Point3,
     TextNode,
     TransparencyAttrib,
@@ -25,7 +27,7 @@ from panda3d.core import (
 from .assets import AssetLibrary
 from .battle import TEAM_COLORS, TEAM_NAMES, Battle
 from .chunks import ChunkManager
-from .player_control import RiflemanController
+from .player_control import PlayerController
 from .terrain import WATER_COLOR, InfiniteTerrain
 
 SKY_COLOR = Vec4(0.52, 0.68, 0.86, 1.0)
@@ -83,7 +85,7 @@ class SimulationApp(ShowBase):
         self.inspect_angle = 0.0
         self.inspect_zoom = 1.0
         self.unit_view_masked = None
-        self.rifle_control = RiflemanController()
+        self.player_control = PlayerController()
 
         self.disable_mouse()
         self.set_background_color(SKY_COLOR)
@@ -237,6 +239,18 @@ class SimulationApp(ShowBase):
             align=TextNode.A_center,
         )
         self.crosshair_text.hide()
+        target_box = LineSegs("jet-target-box")
+        target_box.set_thickness(2.5)
+        target_box.set_color(1.0, 1.0, 1.0, 1.0)
+        target_box.move_to(-0.045, 0.0, -0.045)
+        target_box.draw_to(0.045, 0.0, -0.045)
+        target_box.draw_to(0.045, 0.0, 0.045)
+        target_box.draw_to(-0.045, 0.0, 0.045)
+        target_box.draw_to(-0.045, 0.0, -0.045)
+        self.target_box = self.aspect2d.attach_new_node(target_box.create())
+        self.target_box.set_depth_test(False)
+        self.target_box.set_depth_write(False)
+        self.target_box.hide()
         self._refresh_help()
 
     def _inspect_label(self) -> str:
@@ -261,11 +275,17 @@ class SimulationApp(ShowBase):
         return f"{kind} ({team}) — vida {unit.hp_frac * 100:.0f}%"
 
     def _refresh_help(self) -> None:
-        if self.rifle_control.active:
-            text = (
-                "FUSILERO: W/S avanzar-retroceder   A/D girar   "
-                "CLIC IZQ disparar   [T] soltar control   [ESPACIO] pausa"
-            )
+        if self.player_control.active:
+            if self.player_control.unit.kind == "jet":
+                text = (
+                    "CAZA: W/S potencia   A/D virar   E/ARRIBA subir   Q/ABAJO bajar   "
+                    "CLIC IZQ misil guiado   [T] soltar   [ESPACIO] pausa"
+                )
+            else:
+                text = (
+                    "FUSILERO: W/S avanzar-retroceder   A/D girar   "
+                    "CLIC IZQ disparar   [T] soltar control   [ESPACIO] pausa"
+                )
         elif self.camera_mode == "free":
             text = (
                 "LIBRE: WASD mover   Q/E bajar-subir   ARRASTRA raton para mirar   "
@@ -275,12 +295,12 @@ class SimulationApp(ShowBase):
             text = (
                 "INSPECCION: [TAB] siguiente unidad   [SHIFT+TAB] anterior   "
                 "ARRASTRA girar   RUEDA acercar   [V] vista frontal   "
-                "[T] controlar fusilero   [I] salir"
+                "[T] controlar fusilero/caza   [I] salir"
             )
         elif self.camera_mode == "unit":
             text = (
                 "VISTA DE UNIDAD: [TAB] siguiente   [SHIFT+TAB] anterior   "
-                "[T] controlar fusilero   [V] volver a inspeccion   [I] salir"
+                "[T] controlar fusilero/caza   [V] volver a inspeccion   [I] salir"
             )
         else:
             text = (
@@ -313,7 +333,7 @@ class SimulationApp(ShowBase):
         # Inspector: get right up to a single unit and look it over.
         self.accept("i", self.toggle_inspect)
         self.accept("v", self.toggle_unit_view)
-        self.accept("t", self.toggle_rifle_control)
+        self.accept("t", self.toggle_player_control)
         self.accept("tab", self.cycle_inspect, [1])
         self.accept("shift-tab", self.cycle_inspect, [-1])
         # Held keys rather than key repeat: repeat rates are jerky and differ
@@ -326,7 +346,7 @@ class SimulationApp(ShowBase):
     # Commands
     # ------------------------------------------------------------------
     def _start_battle(self, seed: int) -> None:
-        self._release_rifle_control()
+        self._release_player_control()
         if self.battle is not None:
             self.battle.cleanup()
         self.battle = Battle(
@@ -361,7 +381,7 @@ class SimulationApp(ShowBase):
             self._refresh_help()
 
     def cycle_camera(self) -> None:
-        self._release_rifle_control()
+        self._release_player_control()
         self._restore_unit_view_parts()
         if self.camera_mode in CAMERA_MODES:
             index = CAMERA_MODES.index(self.camera_mode)
@@ -387,7 +407,7 @@ class SimulationApp(ShowBase):
         return [u for u in self.battle.units if not u.np.is_empty()]
 
     def toggle_inspect(self) -> None:
-        self._release_rifle_control()
+        self._release_player_control()
         if self.camera_mode in ("inspect", "unit"):
             self._restore_unit_view_parts()
             self.camera_mode = "orbit"
@@ -405,7 +425,7 @@ class SimulationApp(ShowBase):
     def toggle_unit_view(self) -> None:
         """See straight ahead from the currently selected living unit."""
         if self.camera_mode == "unit":
-            self._release_rifle_control()
+            self._release_player_control()
             self._restore_unit_view_parts()
             self.camera_mode = "inspect"
             self.camLens.set_near(0.8)
@@ -423,25 +443,36 @@ class SimulationApp(ShowBase):
         self.camLens.set_near(0.16)
         self._refresh_help()
 
-    def toggle_rifle_control(self) -> None:
-        """Take or release the selected rifleman from an inspection camera."""
-        if self.rifle_control.active:
-            self._release_rifle_control()
+    def toggle_player_control(self) -> None:
+        """Take or release a controllable unit from an inspection camera."""
+        if self.player_control.active:
+            self._release_player_control()
             self._refresh_help()
             return
         if self.camera_mode not in ("inspect", "unit"):
             return
-        if not self.rifle_control.take(self.inspect_unit):
+        if not self.player_control.take(self.inspect_unit):
             return
         self.camera_mode = "unit"
         self.camLens.set_near(0.16)
-        self.crosshair_text.show()
+        self.camLens.set_fov(78 if self.inspect_unit.kind == "jet" else 60)
+        if self.inspect_unit.kind == "jet":
+            self.crosshair_text.hide()
+            self.target_box.show()
+        else:
+            self.crosshair_text.setText("+")
+            self.crosshair_text.show()
+            self.target_box.hide()
         self._refresh_help()
 
-    def _release_rifle_control(self) -> bool:
-        released = self.rifle_control.release()
+    def _release_player_control(self) -> bool:
+        released = self.player_control.release()
         if hasattr(self, "crosshair_text"):
             self.crosshair_text.hide()
+        if hasattr(self, "target_box"):
+            self.target_box.hide()
+            self.target_box.set_pos(0, 0, 0)
+        self.camLens.set_fov(60)
         return released
 
     def _restore_unit_view_parts(self) -> None:
@@ -454,7 +485,7 @@ class SimulationApp(ShowBase):
 
     def cycle_inspect(self, step: int) -> None:
         """Step through every unit on the field, either team."""
-        self._release_rifle_control()
+        self._release_player_control()
         units = self._inspectable()
         if self.camera_mode == "unit":
             units = [unit for unit in units if unit.alive]
@@ -502,7 +533,7 @@ class SimulationApp(ShowBase):
             "sam": (2.85, 2.35),
             # Procedural aircraft use opaque canopy geometry. Put the camera
             # just ahead of the glazing rather than inside that dark shell.
-            "jet": (5.05, 0.72),
+            "jet": (7.65, 0.72),
             "helicopter": (4.78, 0.62),
             "osprey": (7.18, 0.42),
             "destroyer": (1.4, 4.35),
@@ -520,8 +551,21 @@ class SimulationApp(ShowBase):
                 view_direction += Vec3(0, 0, 0.11)
             if view_direction.length_squared() > 1e-9:
                 view_direction.normalize()
+        elif unit.kind == "jet":
+            # The rigid body is yaw-only for stability, but vertical velocity
+            # is the aircraft's real climb angle. Reflect it in the pilot view
+            # instead of leaving the horizon fixed while ascending.
+            horizontal_speed = math.hypot(unit.velocity.x, unit.velocity.y)
+            # A slight downward sightline keeps the horizon and terrain in the
+            # narrow vertical FOV instead of showing only sky at cruise height.
+            view_direction.z = (
+                unit.velocity.z * 1.8 / max(30.0, horizontal_speed) - 0.10
+            )
+            view_direction.normalize()
         self.camera.set_pos(eye)
         self.camera.look_at(eye + view_direction * 120.0)
+        if unit.kind == "jet":
+            self.camera.set_r(unit.model_np.get_r() * 0.65)
 
     def _update_inspect_camera(self, dt: float) -> None:
         units = self._inspectable()
@@ -551,15 +595,15 @@ class SimulationApp(ShowBase):
         self.camera.look_at(focus)
 
     def _grab_mouse(self, fire_button: bool = False) -> None:
-        if self.rifle_control.active:
+        if self.player_control.active:
             if fire_button:
-                self.rifle_control.firing = True
+                self.player_control.firing = True
             return
         self.dragging = True
         self._drag_from = None
 
     def _release_mouse(self) -> None:
-        self.rifle_control.firing = False
+        self.player_control.firing = False
         self.dragging = False
         self._drag_from = None
 
@@ -655,11 +699,25 @@ class SimulationApp(ShowBase):
         dt = min(self.clock.get_dt(), 0.05)
         if not self.paused:
             self.sim_time += dt
-            had_control = self.rifle_control.active
-            self.rifle_control.update(self.keys, self.battle)
-            if had_control and not self.rifle_control.active:
+            had_control = self.player_control.active
+            self.player_control.update(dt, self.keys, self.battle, self.terrain)
+            if had_control and not self.player_control.active:
                 self.crosshair_text.hide()
                 self._refresh_help()
+            elif self.player_control.active:
+                locked = self.player_control.locked_target is not None
+                unit = self.player_control.unit
+                ready = locked and unit.kind == "jet" and unit.cooldown <= 0.0
+                if ready:
+                    colour = (0.32, 1.0, 0.38, 1.0)
+                elif locked and unit.kind == "jet":
+                    colour = (1.0, 0.78, 0.20, 1.0)
+                else:
+                    colour = (0.94, 0.96, 0.88, 0.92)
+                if unit.kind == "jet":
+                    self.target_box.set_color_scale(*colour)
+                else:
+                    self.crosshair_text.setFg(colour)
             self.battle.step(dt)
             # Fixed-step the solver so behaviour does not depend on framerate.
             self._physics_debt += dt
@@ -668,18 +726,63 @@ class SimulationApp(ShowBase):
                 self._physics_debt -= PHYSICS_STEP
 
         self._update_camera(dt)
+        self._update_target_box()
         self.chunks.update(self._stream_anchors())
         self._follow_world()
 
         self._write_report_once()
         suffix = "   ·   PAUSA" if self.paused else ""
         if self.camera_mode in ("inspect", "unit") and self.inspect_unit is not None:
-            controlled = " — CONTROL MANUAL" if self.rifle_control.active else ""
+            controlled = ""
+            if self.player_control.active:
+                controlled = " — CONTROL MANUAL"
+                if self.player_control.unit.kind == "jet":
+                    if self.player_control.locked_target is None:
+                        lock = "SIN BLOQUEO"
+                    elif self.player_control.unit.cooldown > 0.0:
+                        lock = f"RECARGANDO {self.player_control.unit.cooldown:.1f}s"
+                    else:
+                        lock = "MISIL LISTO"
+                    ground = max(
+                        self.terrain.height_at(
+                            self.player_control.unit.position.x,
+                            self.player_control.unit.position.y,
+                        ),
+                        self.terrain.water_level,
+                    )
+                    altitude = max(
+                        0.0,
+                        self.player_control.unit.position.z - ground,
+                    )
+                    controlled += (
+                        f" — potencia {self.player_control.throttle * 100:.0f}%"
+                        f" — altura {altitude:.0f}m"
+                        f" — {lock}"
+                    )
             self.status_text.setText(self._inspect_label() + controlled + suffix)
         else:
             self.status_text.setText(self.battle.status_text() + suffix)
         self._update_roster()
         return task.cont
+
+    def _update_target_box(self) -> None:
+        """Place the jet acquisition box over its locked target on screen."""
+        if (
+            not self.player_control.active
+            or self.player_control.unit.kind != "jet"
+            or self.target_box.is_hidden()
+        ):
+            return
+        target = self.player_control.locked_target
+        if target is None:
+            self.target_box.set_pos(0, 0, 0)
+            return
+        camera_point = self.camera.get_relative_point(self.render, target.position)
+        screen_point = Point2()
+        if self.camLens.project(camera_point, screen_point):
+            self.target_box.set_pos(screen_point.x, 0, screen_point.y)
+        else:
+            self.target_box.set_pos(0, 0, 0)
 
     def _write_report_once(self) -> None:
         """Dump the battle report the moment the battle is decided."""

@@ -428,6 +428,49 @@ class Unit:
             gain=self.spec.drive_gain,
         )
 
+    def update_manual_jet(
+        self,
+        terrain,
+        throttle: float,
+        turn: float,
+        climb: float,
+    ) -> None:
+        """Fly a directly controlled jet without allowing hover or strafing."""
+        if self.kind != "jet" or not self.alive:
+            return
+
+        angular = self.node.get_angular_velocity()
+        self.node.set_angular_velocity(
+            Vec3(angular.x, angular.y, turn * self.spec.turn_rate)
+        )
+
+        ground = max(
+            terrain.height_at(self.position.x, self.position.y),
+            terrain.water_level,
+        )
+        clearance = self.position.z - ground
+        commanded_vertical_speed = climb * 28.0
+        # Terrain avoidance remains active under manual control. It only
+        # overrides the pilot close to the ground and fades above 24 metres.
+        if clearance < 24.0:
+            commanded_vertical_speed = max(
+                commanded_vertical_speed,
+                (24.0 - clearance) * 1.35,
+            )
+        lift = self.spec.mass * (
+            GRAVITY + (commanded_vertical_speed - self.velocity.z) * 1.9
+        )
+        self.node.apply_central_force(Vec3(0, 0, max(0.0, lift)))
+
+        forward = self.forward
+        flat = Vec3(forward.x, forward.y, 0.0)
+        if flat.length_squared() > 1e-6:
+            flat.normalize()
+        self._drive_horizontal(
+            flat * (self.spec.cruise_speed * throttle),
+            gain=self.spec.drive_gain,
+        )
+
     def _fly(
         self,
         dt: float,
