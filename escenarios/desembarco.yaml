@@ -1,0 +1,29 @@
+# Desembarco: Rojo llega desde el mar y el aire, Azul defiende atrincherado.
+#
+# Los bandos son deliberadamente desiguales, que es lo que las opciones --n-*
+# no pueden expresar: esas dan la misma cantidad a los dos equipos.
+#
+#   uv run main.py --escenario escenarios/desembarco.yaml
+
+escenario:
+  nombre: Desembarco
+  semilla: 11
+  # Azul defiende la ciudad; Rojo viene a por ella. Con `true` a secas el
+  # bando defensor lo sortea la semilla, que aquí no tendría ningún sentido.
+  ciudad: azul
+
+# Atacante: potencia naval y aérea, poca tropa a pie.
+rojo:
+  destructor: 2
+  submarino: 2
+  caza: 6
+  helicoptero: 4
+  convertiplano: 2
+  fusilero: 6
+
+# Defensor: sin marina, pero mucho blindaje, antiaérea y anticarro.
+azul:
+  tanque: 8
+  rpg: 8
+  antiaerea: 5
+  fusilero: 20

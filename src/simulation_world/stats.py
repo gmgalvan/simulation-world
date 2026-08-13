@@ -234,7 +234,7 @@ class BattleStats:
                 key=lambda item: (-item[1], item[0]),
             ):
                 description = (
-                    f"{TEAM_LABELS[team]} · {KIND_LABELS.get(shooter, shooter)} / "
+                    f"{TEAM_LABELS[team]} - {KIND_LABELS.get(shooter, shooter)} / "
                     f"{weapon} -> {KIND_LABELS.get(victim, victim)}"
                 )
                 add(f"  {description:<66}{count:>4}")

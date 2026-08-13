@@ -60,6 +60,19 @@ HELI_MISSILE_RANGE = 420.0
 HELI_MISSILE_PERIOD = 1.6
 CIWS_DEFENSIVE_PERIOD = 0.25
 
+# What each side fields when nothing says otherwise.
+DEFAULT_ROSTER = {
+    "helicopter": 3,
+    "tank": 4,
+    "osprey": 1,
+    "jet": 4,
+    "sam": 2,
+    "rifleman": 6,
+    "rocket": 3,
+    "destroyer": 1,
+    "submarine": 1,
+}
+
 # Target preference as (shooter kind, target kind) -> score multiplier; lower
 # is more attractive, missing pairs default to 1.0. Tanks must not chase
 # helicopters: a slow ballistic shell almost never catches an orbiting one, so
@@ -201,16 +214,16 @@ class Battle:
         world,
         terrain,
         assets,
-        n_heli: int = 3,
-        n_tanks: int = 4,
-        n_osprey: int = 1,
-        n_jets: int = 4,
-        n_sam: int = 2,
-        n_rifles: int = 6,
-        n_rockets: int = 3,
-        n_destroyers: int = 1,
-        n_submarines: int = 1,
+        # How many of each kind each side deploys: team -> kind -> count.
+        # One structure rather than nine symmetric counters, because the two
+        # sides are allowed to differ — that is the whole point of a scenario.
+        # Named for what it is and NOT `roster`: that name is already a method
+        # returning the *surviving* units for the HUD legend, and an attribute
+        # of the same name silently shadows it.
+        order_of_battle: dict[int, dict[str, int]] | None = None,
         city_enabled: bool = True,
+        # Which side the city belongs to; None draws it from the seed.
+        city_team: int | None = None,
         seed: int = 0,
         deploy_radius: float = 240.0,
         origin: tuple[float, float] = (0.0, 0.0),
@@ -234,11 +247,18 @@ class Battle:
         self.stats = BattleStats(seed)
         self.deploy_radius = deploy_radius
         self.origin = origin
+        self.order_of_battle = {
+            team: dict(order_of_battle.get(team, {}))
+            if order_of_battle
+            else dict(DEFAULT_ROSTER)
+            for team in (0, 1)
+        }
         self.city: City | None = None
 
         if city_enabled:
             city_rng = random.Random(seed + 8_119)
-            defending_team = city_rng.randrange(2)
+            drawn = city_rng.randrange(2)
+            defending_team = drawn if city_team is None else city_team
             self.city = City(
                 self.root,
                 self.world,
@@ -254,10 +274,7 @@ class Battle:
             for car in self.city.cars:
                 self.stats.deploy(car.kind, car.team)
 
-        self._spawn(
-            n_heli, n_tanks, n_osprey, n_jets, n_sam, n_rifles, n_rockets,
-            n_destroyers, n_submarines,
-        )
+        self._spawn()
 
     def _city_site(
         self, defending_team: int, rng: random.Random
@@ -291,18 +308,7 @@ class Battle:
     # ------------------------------------------------------------------
     # Setup
     # ------------------------------------------------------------------
-    def _spawn(
-        self,
-        n_heli: int,
-        n_tanks: int,
-        n_osprey: int = 0,
-        n_jets: int = 0,
-        n_sam: int = 0,
-        n_rifles: int = 0,
-        n_rockets: int = 0,
-        n_destroyers: int = 0,
-        n_submarines: int = 0,
-    ) -> None:
+    def _spawn(self) -> None:
         # The world has no edges any more, so deployment is a radius around an
         # origin rather than a fraction of the map.
         half = self.deploy_radius
@@ -311,6 +317,16 @@ class Battle:
         for team, sign in ((0, -1.0), (1, 1.0)):
             heading = math.pi / 2 if sign < 0 else -math.pi / 2
             color = TEAM_COLORS[team]
+            counts = self.order_of_battle[team]
+            n_heli = counts.get("helicopter", 0)
+            n_osprey = counts.get("osprey", 0)
+            n_jets = counts.get("jet", 0)
+            n_destroyers = counts.get("destroyer", 0)
+            n_submarines = counts.get("submarine", 0)
+            n_tanks = counts.get("tank", 0)
+            n_sam = counts.get("sam", 0)
+            n_rifles = counts.get("rifleman", 0)
+            n_rockets = counts.get("rocket", 0)
 
             for i in range(n_heli):
                 x = ox + sign * self.rng.uniform(half * 0.55, half * 0.85)
@@ -529,7 +545,10 @@ class Battle:
         return [u for u in self.units if u.alive]
 
     def roster(self, team: int) -> dict[str, int]:
-        """Surviving units of each kind, for the HUD legend."""
+        """Surviving units of each kind, for the HUD legend.
+
+        Not to be confused with `order_of_battle`, which is what was deployed.
+        """
         counts: dict[str, int] = {}
         for unit in self.units:
             if unit.alive and unit.team == team:
@@ -1564,8 +1583,8 @@ class Battle:
                 )
             return text
         if self.winner == -1:
-            return "Empate: aniquilación mutua   ·   [R] nueva batalla"
-        return f"¡Gana el equipo {TEAM_NAMES[self.winner]}!   ·   [R] nueva batalla"
+            return "Empate: aniquilación mutua   -   [R] nueva batalla"
+        return f"¡Gana el equipo {TEAM_NAMES[self.winner]}!   -   [R] nueva batalla"
 
     def cleanup(self) -> None:
         self.effects.clear()

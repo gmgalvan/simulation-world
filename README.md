@@ -354,6 +354,45 @@ En modo **libre** vuelas tú por el mundo y el terreno se va generando por
 delante. La niebla está ajustada al radio de carga para que los chunks aparezcan
 dentro de la bruma en vez de a la vista.
 
+## Escenarios
+
+Las opciones `--n-*` dan **la misma cantidad a los dos equipos**, así que no
+pueden expresar lo interesante: un desembarco, blindados contra infantería, una
+flota contra la costa. Para eso hay archivos de escenario:
+
+```bash
+uv run main.py --escenario escenarios/desembarco.yaml
+```
+
+```yaml
+escenario:
+  nombre: Desembarco
+  semilla: 11
+  ciudad: azul        # true/false, o el bando que la defiende
+
+rojo:                 # atacante: potencia naval y aérea
+  destructor: 2
+  submarino: 2
+  caza: 6
+  helicoptero: 4
+
+azul:                 # defensor atrincherado, sin marina
+  tanque: 8
+  rpg: 8
+  antiaerea: 5
+  fusilero: 20
+```
+
+Las unidades se nombran en español (`caza`, `helicoptero`, `tanque`, `rpg`,
+`antiaerea`, `destructor`, `submarino`, `convertiplano`, `fusilero`); los
+acentos y los nombres internos en inglés también valen. Lo que el archivo diga
+manda sobre las `--n-*`, la `--seed` y la `--city`, de modo que un escenario se
+reproduce solo. Sin `--escenario` todo sigue exactamente como antes.
+
+Un archivo inválido **para la ejecución con un mensaje concreto** en vez de
+arrancar una batalla que no era la pedida: unidad mal escrita, cantidad
+negativa, un bando sin unidades.
+
 ## Requisitos
 
 - [`uv`](https://docs.astral.sh/uv/).
@@ -409,6 +448,7 @@ uv run main.py --help
 | Opción | Por defecto | Qué hace |
 |---|---|---|
 | `--seed N` | `0` | Semilla del mundo y del despliegue |
+| `--escenario ARCHIVO.yaml` | — | **Orden de batalla asimétrico** desde un archivo. Manda sobre las `--n-*` |
 | `--city BOOL` | `true` | Ciudad defendida con edificios, coches y civiles (`--city=false` la desactiva) |
 | `--n-heli N` | `3` | Helicópteros por equipo |
 | `--n-tanks N` | `4` | Tanques por equipo |
@@ -495,6 +535,7 @@ Al arrancar, la consola dice qué se cargó:
 
 ```
 main.py                         # punto de entrada
+escenarios/                     # órdenes de batalla asimétricos (YAML)
 assets/
   README.md                     # guía para meter modelos reales
   models.json                   # escala / orientación / nombres de piezas
@@ -510,8 +551,9 @@ src/simulation_world/
   entities.py                   # Unit: cuerpo rígido + modelo de vuelo/conducción
   effects.py                    # trazadoras, obuses, explosiones, escombros
   battle.py                     # IA de combate, disparo, bajas, victoria
-  player_control.py             # control manual opcional de fusilero y caza
-  flight_hud.py                 # instrumentos y adquisición del caza controlado
+  player_control.py             # control manual de fusilero, caza y helicóptero
+  flight_hud.py                 # cabinas del caza y del helicóptero controlados
+  scenario.py                   # orden de batalla asimétrico leído de un YAML
   app.py                        # ventana, luces, cámara, HUD, bucle principal
   stats.py                      # recuento e informes TXT/JSON de la batalla
   simulation.py                 # CLI

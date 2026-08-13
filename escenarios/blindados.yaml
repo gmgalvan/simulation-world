@@ -1,0 +1,20 @@
+# Blindados contra infantería: ¿cuántos equipos de RPG hacen falta para frenar
+# una columna de tanques? Sin marina ni ciudad, para que no enturbien la lectura.
+#
+#   uv run main.py --escenario escenarios/blindados.yaml
+#
+# El informe que se escribe al terminar responde la pregunta en números.
+
+escenario:
+  nombre: Columna blindada
+  semilla: 4
+  ciudad: false
+
+rojo:
+  tanque: 10
+  fusilero: 8
+
+azul:
+  rpg: 12
+  fusilero: 14
+  antiaerea: 1   # nada que hacer contra tanques, pero cierra el cielo

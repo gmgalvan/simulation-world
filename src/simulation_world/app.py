@@ -278,7 +278,7 @@ class SimulationApp(ShowBase):
                 missiles = self.player_control.unit.manual_missiles
                 text = (
                     "HELICOPTERO: W/S adelante-atras   A/D guiñada   "
-                    "E/ARRIBA subir   Q/ABAJO bajar   ←/→ desplazar   "
+                    "E/ARRIBA subir   Q/ABAJO bajar   IZQ/DER desplazar   "
                     f"CLIC IZQ misil ({missiles})   CLIC DER canon   [T] soltar"
                 )
             else:
@@ -354,16 +354,9 @@ class SimulationApp(ShowBase):
             self.world,
             self.terrain,
             self.assets,
-            n_heli=self.args.n_heli,
-            n_tanks=self.args.n_tanks,
-            n_destroyers=self.args.n_destroyers,
-            n_submarines=self.args.n_submarines,
+            order_of_battle=self.args.roster,
             city_enabled=self.args.city,
-            n_osprey=self.args.n_osprey,
-            n_jets=self.args.n_jets,
-            n_sam=self.args.n_sam,
-            n_rifles=self.args.n_rifles,
-            n_rockets=self.args.n_rockets,
+            city_team=self.args.city_team,
             seed=seed,
             deploy_radius=self.args.deploy,
         )
@@ -763,7 +756,7 @@ class SimulationApp(ShowBase):
         self._follow_world()
 
         self._write_report_once()
-        suffix = "   ·   PAUSA" if self.paused else ""
+        suffix = "   -   PAUSA" if self.paused else ""
         if self.camera_mode in ("inspect", "unit") and self.inspect_unit is not None:
             controlled = ""
             if self.player_control.active:

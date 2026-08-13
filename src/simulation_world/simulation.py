@@ -25,6 +25,17 @@ def build_argparser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--seed", type=int, default=0, help="Semilla del terreno y del despliegue.")
     parser.add_argument(
+        "--escenario",
+        type=Path,
+        default=None,
+        metavar="ARCHIVO.yaml",
+        help=(
+            "Orden de batalla en YAML, con secciones 'rojo' y 'azul'. Permite bandos "
+            "asimétricos, cosa que las opciones --n-* no pueden: esas dan la misma "
+            "cantidad a los dos equipos. Si se pasa, manda sobre las --n-*."
+        ),
+    )
+    parser.add_argument(
         "--city",
         type=_bool_flag,
         default=True,
@@ -182,8 +193,46 @@ def _render_shots(app, args) -> None:
         print(f"[shot] {path}  t={app.sim_time:5.1f}s  {app.battle.status_text()}")
 
 
+def resolve_roster(args) -> None:
+    """Settle the order of battle onto `args`, from the file or the options.
+
+    The file wins where it speaks, so a scenario is reproducible on its own,
+    and the --n-* options stay as the quick symmetric skirmish.
+    """
+    from .scenario import ScenarioError, load, symmetric_roster
+
+    counts = {
+        "helicopter": args.n_heli,
+        "tank": args.n_tanks,
+        "osprey": args.n_osprey,
+        "jet": args.n_jets,
+        "sam": args.n_sam,
+        "rifleman": args.n_rifles,
+        "rocket": args.n_rockets,
+        "destroyer": args.n_destroyers,
+        "submarine": args.n_submarines,
+    }
+    args.city_team = None
+    if args.escenario is None:
+        args.roster = symmetric_roster(counts)
+        return
+
+    try:
+        scenario = load(args.escenario)
+    except ScenarioError as error:
+        raise SystemExit(f"[escenario] {error}")
+    args.roster = scenario.roster
+    if scenario.seed is not None:
+        args.seed = scenario.seed
+    if scenario.city is not None:
+        args.city = scenario.city
+    args.city_team = scenario.city_team
+    print(scenario.summary())
+
+
 def main(argv: list[str] | None = None) -> None:
     args = build_argparser().parse_args(argv)
+    resolve_roster(args)
     _configure_panda(args)
 
     from .app import SimulationApp
